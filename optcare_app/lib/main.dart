@@ -838,6 +838,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<dynamic> _appointments = [];
   List<FrameModel> _frames = [];
 
+  final TextEditingController _frameSearchController =
+  TextEditingController();
+  String _frameSearchQuery = '';
+  String _selectedFrameCategory = 'All';
+
+  List<FrameModel> get _filteredFrames {
+    final query = _frameSearchQuery.trim().toLowerCase();
+
+    return _frames.where((frame) {
+      final name = frame.name.toLowerCase();
+      final brand = (frame.brand ?? '').toLowerCase();
+      final material = (frame.material ?? '').toLowerCase();
+      final category = (frame.category ?? '').toLowerCase();
+
+      final matchesSearch =
+          query.isEmpty ||
+          name.contains(query) ||
+          brand.contains(query) ||
+          material.contains(query) ||
+          category.contains(query);
+
+      final matchesCategory =
+          _selectedFrameCategory == 'All' ||
+          category == _selectedFrameCategory.toLowerCase();
+
+      return matchesSearch && matchesCategory;
+    }).toList();
+  }
+
+  List<String> get _frameCategories {
+    final categories = <String>{};
+
+    for (final frame in _frames) {
+      final category = frame.category?.trim();
+
+      if (category != null && category.isNotEmpty) {
+        categories.add(category);
+      }
+    }
+
+    final sortedCategories = categories.toList()
+      ..sort(
+        (a, b) => a.toLowerCase().compareTo(
+              b.toLowerCase(),
+            ),
+      );
+
+    return ['All', ...sortedCategories];
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1257,8 +1307,9 @@ Future<void> _loadFrames() async {
     });
   }
 
-  @override
+   @override
   void dispose() {
+    _frameSearchController.dispose();
     super.dispose();
   }
 
@@ -1611,9 +1662,11 @@ SizedBox(
     );
   }
 
-  Widget _buildFramesTab() {
+   Widget _buildFramesTab() {
     if (_loadingFrames && _frames.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
     }
 
     if (_framesError && _frames.isEmpty) {
@@ -1623,12 +1676,19 @@ SizedBox(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.grey),
+              const Icon(
+                Icons.error_outline,
+                size: 48,
+                color: Colors.grey,
+              ),
               const SizedBox(height: 12),
               Text(
-                _framesErrorMessage ?? 'Unable to load frame models.',
+                _framesErrorMessage ??
+                    'Unable to load frame models.',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.black54),
+                style: const TextStyle(
+                  color: Colors.black54,
+                ),
               ),
               const SizedBox(height: 12),
               ElevatedButton(
@@ -1642,163 +1702,623 @@ SizedBox(
     }
 
     if (_frames.isEmpty) {
-      return const Center(child: Text('No frames available.'));
+      return RefreshIndicator(
+        onRefresh: _loadFrames,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            SizedBox(height: 250),
+            Center(
+              child: Text(
+                'No frames available.',
+                style: TextStyle(
+                  color: Colors.black54,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
     }
 
-    return RefreshIndicator(
-      onRefresh: _loadFrames,
-      child: GridView.builder(
-        padding: const EdgeInsets.all(16),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 0.82,
-        ),
-        itemCount: _frames.length,
-        itemBuilder: (context, index) {
-          final frame = _frames[index];
-          final imageUrl = resolveFrameImageUrl(frame.imageUrl);
-          final inStock = frame.stockQuantity > 0;
+    final filteredFrames = _filteredFrames;
+    final categories = _frameCategories;
 
-          return InkWell(
-            onTap: () => _showFrameDetails(frame),
-            borderRadius: BorderRadius.circular(20),
-            child: Card(
-              margin: EdgeInsets.zero,
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
+    return Column(
+      children: [
+
+        // =====================================================
+        // SEARCH BAR
+        // =====================================================
+
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            16,
+            16,
+            16,
+            8,
+          ),
+          child: TextField(
+            controller: _frameSearchController,
+            onChanged: (value) {
+              setState(() {
+                _frameSearchQuery = value;
+              });
+            },
+            decoration: InputDecoration(
+              hintText:
+                  'Search frames, brands...',
+              prefixIcon: const Icon(
+                Icons.search,
+                color: Color(0xFF0F76FF),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ClipRRect(
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(20),
-                    ),
-                    child: imageUrl.isNotEmpty
-                        ? Image.network(
-                            imageUrl,
-                            height: 120,
-                            width: double.infinity,
-                            fit: BoxFit.contain,
-                            loadingBuilder: (context, child, loadingProgress) {
-                              if (loadingProgress == null) return child;
-                              return Container(
-                                height: 120,
-                                width: double.infinity,
-                                color: const Color(0xFFEAF2FF),
-                                child: const Center(
-                                  child: SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                            errorBuilder: (_, __, ___) => Container(
-                              height: 120,
-                              width: double.infinity,
-                              color: const Color(0xFFEAF2FF),
-                              child: const Icon(
-                                Icons.remove_red_eye,
-                                size: 34,
-                                color: Color(0xFF0F76FF),
-                              ),
-                            ),
-                          )
-                        : Container(
-                            height: 120,
-                            width: double.infinity,
-                            color: const Color(0xFFEAF2FF),
-                            child: const Icon(
-                              Icons.remove_red_eye,
-                              size: 34,
-                              color: Color(0xFF0F76FF),
-                            ),
+              suffixIcon:
+                  _frameSearchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(
+                            Icons.clear,
                           ),
+                          onPressed: () {
+                            _frameSearchController.clear();
+
+                            setState(() {
+                              _frameSearchQuery = '';
+                            });
+                          },
+                        )
+                      : null,
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding:
+                  const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 14,
+              ),
+              border: OutlineInputBorder(
+                borderRadius:
+                    BorderRadius.circular(16),
+                borderSide: BorderSide(
+                  color: Colors.grey.shade200,
+                ),
+              ),
+              enabledBorder:
+                  OutlineInputBorder(
+                borderRadius:
+                    BorderRadius.circular(16),
+                borderSide: BorderSide(
+                  color: Colors.grey.shade200,
+                ),
+              ),
+              focusedBorder:
+                  OutlineInputBorder(
+                borderRadius:
+                    BorderRadius.circular(16),
+                borderSide: const BorderSide(
+                  color: Color(0xFF0F76FF),
+                  width: 1.5,
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // =====================================================
+        // CATEGORY FILTERS
+        // =====================================================
+
+        SizedBox(
+          height: 48,
+          child: ListView.separated(
+            padding:
+                const EdgeInsets.symmetric(
+              horizontal: 16,
+            ),
+            scrollDirection:
+                Axis.horizontal,
+            itemCount: categories.length,
+            separatorBuilder: (_, __) =>
+                const SizedBox(width: 8),
+            itemBuilder:
+                (context, index) {
+
+              final category =
+                  categories[index];
+
+              final isSelected =
+                  _selectedFrameCategory ==
+                      category;
+
+              return ChoiceChip(
+                label: Text(
+                  category,
+                ),
+                selected: isSelected,
+                onSelected: (_) {
+                  setState(() {
+                    _selectedFrameCategory =
+                        category;
+                  });
+                },
+                selectedColor:
+                    const Color(0xFF0F76FF),
+                backgroundColor:
+                    Colors.white,
+                labelStyle: TextStyle(
+                  color: isSelected
+                      ? Colors.white
+                      : Colors.black87,
+                  fontWeight:
+                      isSelected
+                          ? FontWeight.bold
+                          : FontWeight.w500,
+                ),
+                side: BorderSide(
+                  color: isSelected
+                      ? const Color(
+                          0xFF0F76FF,
+                        )
+                      : Colors.grey.shade300,
+                ),
+                shape:
+                    RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(
+                    12,
                   ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            frame.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
+                ),
+              );
+            },
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
+        // =====================================================
+        // RESULT COUNT
+        // =====================================================
+
+        Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 4,
+          ),
+          child: Row(
+            children: [
+              Text(
+                '${filteredFrames.length} '
+                '${filteredFrames.length == 1 ? 'frame' : 'frames'}',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black54,
+                ),
+              ),
+
+              const Spacer(),
+
+              if (
+                _frameSearchQuery.isNotEmpty ||
+                _selectedFrameCategory != 'All'
+              )
+                TextButton(
+                  onPressed: () {
+                    _frameSearchController.clear();
+
+                    setState(() {
+                      _frameSearchQuery = '';
+                      _selectedFrameCategory =
+                          'All';
+                    });
+                  },
+                  style: TextButton.styleFrom(
+                    padding:
+                        const EdgeInsets
+                            .symmetric(
+                      horizontal: 8,
+                    ),
+                    minimumSize:
+                        Size.zero,
+                  ),
+                  child: const Text(
+                    'Clear filters',
+                    style: TextStyle(
+                      color:
+                          Color(0xFF0F76FF),
+                      fontWeight:
+                          FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+
+        // =====================================================
+        // FRAME GRID
+        // =====================================================
+
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _loadFrames,
+            child: filteredFrames.isEmpty
+                ? ListView(
+                    physics:
+                        const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      const SizedBox(
+                        height: 100,
+                      ),
+                      Icon(
+                        Icons.search_off,
+                        size: 52,
+                        color:
+                            Colors.grey.shade400,
+                      ),
+                      const SizedBox(
+                        height: 12,
+                      ),
+                      const Center(
+                        child: Text(
+                          'No frames found',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight:
+                                FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(
+                        height: 6,
+                      ),
+                      const Center(
+                        child: Text(
+                          'Try another search or category.',
+                          style: TextStyle(
+                            color:
+                                Colors.black54,
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : GridView.builder(
+                    padding:
+                        const EdgeInsets.fromLTRB(
+                      16,
+                      8,
+                      16,
+                      16,
+                    ),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 0.82,
+                    ),
+                    itemCount:
+                        filteredFrames.length,
+                    itemBuilder:
+                        (context, index) {
+
+                      final frame =
+                          filteredFrames[index];
+
+                      final imageUrl =
+                          resolveFrameImageUrl(
+                        frame.imageUrl,
+                      );
+
+                      final inStock =
+                          frame.stockQuantity > 0;
+
+                      return InkWell(
+                        onTap: () =>
+                            _showFrameDetails(
+                          frame,
+                        ),
+                        borderRadius:
+                            BorderRadius.circular(
+                          20,
+                        ),
+                        child: Card(
+                          margin:
+                              EdgeInsets.zero,
+                          elevation: 2,
+                          shape:
+                              RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius
+                                    .circular(
+                              20,
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          if (frame.brand != null &&
-                              frame.brand!.trim().isNotEmpty)
-                            Text(
-                              frame.brand!,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: Colors.black54,
-                              ),
-                            ),
-                          const Spacer(),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            crossAxisAlignment: CrossAxisAlignment.center,
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment
+                                    .start,
                             children: [
-                              Expanded(
-                                child: Text(
-                                  '₱${frame.price.toStringAsFixed(2)}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF0F76FF),
+
+                              // =========================
+                              // IMAGE
+                              // =========================
+
+                              ClipRRect(
+                                borderRadius:
+                                    const BorderRadius
+                                        .vertical(
+                                  top:
+                                      Radius.circular(
+                                    20,
                                   ),
                                 ),
+                                child: imageUrl
+                                        .isNotEmpty
+                                    ? Image.network(
+                                        imageUrl,
+                                        height: 120,
+                                        width:
+                                            double.infinity,
+                                        fit: BoxFit
+                                            .contain,
+                                        loadingBuilder:
+                                            (
+                                              context,
+                                              child,
+                                              loadingProgress,
+                                            ) {
+                                          if (loadingProgress ==
+                                              null) {
+                                            return child;
+                                          }
+
+                                          return Container(
+                                            height:
+                                                120,
+                                            width:
+                                                double.infinity,
+                                            color:
+                                                const Color(
+                                              0xFFEAF2FF,
+                                            ),
+                                            child:
+                                                const Center(
+                                              child:
+                                                  SizedBox(
+                                                width:
+                                                    18,
+                                                height:
+                                                    18,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                  strokeWidth:
+                                                      2,
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        errorBuilder:
+                                            (
+                                              _,
+                                              __,
+                                              ___,
+                                            ) =>
+                                                Container(
+                                          height:
+                                              120,
+                                          width:
+                                              double.infinity,
+                                          color:
+                                              const Color(
+                                            0xFFEAF2FF,
+                                          ),
+                                          child:
+                                              const Icon(
+                                            Icons
+                                                .remove_red_eye,
+                                            size:
+                                                34,
+                                            color:
+                                                Color(
+                                              0xFF0F76FF,
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                    : Container(
+                                        height:
+                                            120,
+                                        width:
+                                            double.infinity,
+                                        color:
+                                            const Color(
+                                          0xFFEAF2FF,
+                                        ),
+                                        child:
+                                            const Icon(
+                                          Icons
+                                              .remove_red_eye,
+                                          size:
+                                              34,
+                                          color:
+                                              Color(
+                                            0xFF0F76FF,
+                                          ),
+                                        ),
+                                      ),
                               ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: inStock
-                                      ? Colors.green.withValues(alpha: 0.12)
-                                      : Colors.red.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  inStock ? 'Available' : 'Sold out',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: inStock ? Colors.green : Colors.red,
-                                    fontWeight: FontWeight.bold,
+
+                              // =========================
+                              // DETAILS
+                              // =========================
+
+                              Expanded(
+                                child:
+                                    Padding(
+                                  padding:
+                                      const EdgeInsets
+                                          .fromLTRB(
+                                    12,
+                                    10,
+                                    12,
+                                    12,
+                                  ),
+                                  child:
+                                      Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment
+                                            .start,
+                                    children: [
+
+                                      Text(
+                                        frame.name,
+                                        maxLines:
+                                            2,
+                                        overflow:
+                                            TextOverflow
+                                                .ellipsis,
+                                        style:
+                                            const TextStyle(
+                                          fontSize:
+                                              14,
+                                          fontWeight:
+                                              FontWeight
+                                                  .bold,
+                                          color:
+                                              Colors
+                                                  .black87,
+                                        ),
+                                      ),
+
+                                      const SizedBox(
+                                        height: 4,
+                                      ),
+
+                                      if (
+                                        frame.brand !=
+                                                null &&
+                                            frame.brand!
+                                                .trim()
+                                                .isNotEmpty
+                                      )
+                                        Text(
+                                          frame.brand!,
+                                          maxLines:
+                                              1,
+                                          overflow:
+                                              TextOverflow
+                                                  .ellipsis,
+                                          style:
+                                              const TextStyle(
+                                            fontSize:
+                                                11,
+                                            color:
+                                                Colors
+                                                    .black54,
+                                          ),
+                                        ),
+
+                                      const Spacer(),
+
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment
+                                                .spaceBetween,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment
+                                                .center,
+                                        children: [
+
+                                          Expanded(
+                                            child:
+                                                Text(
+                                              '₱${frame.price.toStringAsFixed(2)}',
+                                              maxLines:
+                                                  1,
+                                              overflow:
+                                                  TextOverflow
+                                                      .ellipsis,
+                                              style:
+                                                  const TextStyle(
+                                                fontSize:
+                                                    15,
+                                                fontWeight:
+                                                    FontWeight
+                                                        .bold,
+                                                color:
+                                                    Color(
+                                                  0xFF0F76FF,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+
+                                          Container(
+                                            padding:
+                                                const EdgeInsets
+                                                    .symmetric(
+                                              horizontal:
+                                                  8,
+                                              vertical:
+                                                  4,
+                                            ),
+                                            decoration:
+                                                BoxDecoration(
+                                              color: inStock
+                                                  ? Colors
+                                                      .green
+                                                      .withValues(
+                                                      alpha:
+                                                          0.12,
+                                                    )
+                                                  : Colors
+                                                      .red
+                                                      .withValues(
+                                                      alpha:
+                                                          0.12,
+                                                    ),
+                                              borderRadius:
+                                                  BorderRadius
+                                                      .circular(
+                                                999,
+                                              ),
+                                            ),
+                                            child:
+                                                Text(
+                                              inStock
+                                                  ? 'Available'
+                                                  : 'Sold out',
+                                              style:
+                                                  TextStyle(
+                                                fontSize:
+                                                    10,
+                                                color: inStock
+                                                    ? Colors
+                                                        .green
+                                                    : Colors
+                                                        .red,
+                                                fontWeight:
+                                                    FontWeight
+                                                        .bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    ),
+                        ),
+                      );
+                    },
                   ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+          ),
+        ),
+      ],
     );
   }
 
