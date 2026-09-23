@@ -8,6 +8,7 @@ import 'constants.dart';
 import 'notification_screen.dart';
 import 'settings_screen.dart';
 import 'edit_profile_screen.dart';
+import 'try_on_webview_screen.dart';
 
 class Main {
   static const String baseUrl = 'https://gonzalesvisionclinic.onrender.com/api';
@@ -847,6 +848,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _loadFrames();
   }
 
+//tryon webview
+void _openTryOn(FrameModel frame) {
+  final uri = Uri.parse(
+    '$tryOnBaseUrl'
+    '?frameId=${Uri.encodeComponent(frame.frameId.toString())}'
+    '&mobileTryOn=true',
+  );
+
+  debugPrint('OPENING TRY-ON FOR FRAME: ${frame.frameId}');
+  debugPrint('TRY-ON URL: $uri');
+
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => TryOnWebViewScreen(
+        url: uri,
+        frameName: frame.name,
+      ),
+    ),
+  );
+}
+
 // profile
   Future<void> _refreshProfile() async {
   try {
@@ -1542,26 +1564,50 @@ Future<void> _loadFrames() async {
                       frame.category!.trim().isNotEmpty)
                     _InfoRow(label: 'Category', value: frame.category!),
                   const SizedBox(height: 12),
-                  const Text(
-                    'Description',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    (frame.description != null &&
-                            frame.description!.trim().isNotEmpty)
-                        ? frame.description!
-                        : 'No description available for this frame.',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Colors.black54,
-                      height: 1.5,
-                    ),
-                  ),
+                 const Text(
+  'Description',
+  style: TextStyle(
+    fontSize: 14,
+    fontWeight: FontWeight.bold,
+    color: Colors.black87,
+  ),
+),
+
+const SizedBox(height: 6),
+
+Text(
+  (frame.description != null &&
+          frame.description!.trim().isNotEmpty)
+      ? frame.description!
+      : 'No description available for this frame.',
+  style: const TextStyle(
+    fontSize: 14,
+    color: Colors.black54,
+    height: 1.5,
+  ),
+),
+
+const SizedBox(height: 24),
+
+SizedBox(
+  width: double.infinity,
+  child: ElevatedButton.icon(
+    onPressed: () {
+      Navigator.of(context).pop();
+      _openTryOn(frame);
+    },
+    icon: const Icon(Icons.view_in_ar),
+    label: const Text('Try On'),
+    style: ElevatedButton.styleFrom(
+      backgroundColor: const Color(0xFF0F76FF),
+      foregroundColor: Colors.white,
+      padding: const EdgeInsets.symmetric(vertical: 15),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+    ),
+  ),
+),
                 ],
               ),
             ),
