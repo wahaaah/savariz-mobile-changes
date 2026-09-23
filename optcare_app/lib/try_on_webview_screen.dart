@@ -28,8 +28,11 @@ class _TryOnWebViewScreenState
     ).replace(
       queryParameters: {
         'frameId': widget.frameId.toString(),
+        'mobileTryOn': 'true',
       },
     );
+
+    debugPrint('TRY-ON URL: $url');
 
     _controller = WebViewController()
       ..setJavaScriptMode(
