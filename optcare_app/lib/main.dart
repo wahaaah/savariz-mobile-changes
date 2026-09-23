@@ -848,22 +848,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _loadFrames();
   }
 
-//tryon webview
+//tryon
 void _openTryOn(FrameModel frame) {
-  final uri = Uri.parse(
-    '$tryOnBaseUrl'
-    '?frameId=${Uri.encodeComponent(frame.frameId.toString())}'
-    '&mobileTryOn=true',
+  debugPrint(
+    'OPENING TRY-ON FOR FRAME: ${frame.frameId}',
   );
-
-  debugPrint('OPENING TRY-ON FOR FRAME: ${frame.frameId}');
-  debugPrint('TRY-ON URL: $uri');
 
   Navigator.of(context).push(
     MaterialPageRoute(
       builder: (_) => TryOnWebViewScreen(
-        url: uri,
-        frameName: frame.name,
+        frameId: frame.frameId,
       ),
     ),
   );
