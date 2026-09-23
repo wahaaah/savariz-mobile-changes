@@ -75,6 +75,20 @@ class _TryOnWebViewScreenState
       ..setJavaScriptMode(
         JavaScriptMode.unrestricted,
       )
+
+      // --------------------------------------------------
+      // RECEIVE JAVASCRIPT LOGS FROM THE VTO WEBSITE
+      // --------------------------------------------------
+
+      ..addJavaScriptChannel(
+        'FlutterLog',
+        onMessageReceived: (message) {
+          debugPrint(
+            '📱 VTO JS: ${message.message}',
+          );
+        },
+      )
+
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (url) {
@@ -103,12 +117,14 @@ class _TryOnWebViewScreenState
 
     if (controller.platform
         is AndroidWebViewController) {
+
       final androidController =
           controller.platform
               as AndroidWebViewController;
 
       androidController.setOnPlatformPermissionRequest(
         (request) async {
+
           debugPrint(
             '🌐 WEBVIEW PERMISSION REQUEST: '
             '${request.types}',
@@ -117,6 +133,7 @@ class _TryOnWebViewScreenState
           if (request.types.contains(
             WebViewPermissionResourceType.camera,
           )) {
+
             final permission =
                 await Permission.camera.status;
 
@@ -125,19 +142,24 @@ class _TryOnWebViewScreenState
             );
 
             if (permission.isGranted) {
+
               debugPrint(
                 '✅ GRANTING WEBVIEW CAMERA',
               );
 
               await request.grant();
+
             } else {
+
               debugPrint(
                 '❌ CAMERA NOT GRANTED - DENYING WEBVIEW',
               );
 
               await request.deny();
             }
+
           } else {
+
             debugPrint(
               '❌ UNKNOWN WEBVIEW PERMISSION - DENY',
             );
@@ -152,6 +174,10 @@ class _TryOnWebViewScreenState
     // 5. LOAD WEB TRY-ON
     // --------------------------------------------------
 
+    debugPrint(
+      '🌐 LOADING TRY-ON WEBPAGE...',
+    );
+
     await controller.loadRequest(url);
 
     // --------------------------------------------------
@@ -163,6 +189,10 @@ class _TryOnWebViewScreenState
     setState(() {
       _controller = controller;
     });
+
+    debugPrint(
+      '✅ TRY-ON WEBVIEW INITIALIZED',
+    );
   }
 
   @override
