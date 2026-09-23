@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
@@ -18,11 +19,40 @@ class TryOnWebViewScreen extends StatefulWidget {
 class _TryOnWebViewScreenState
     extends State<TryOnWebViewScreen> {
 
-  late final WebViewController _controller;
+  WebViewController? _controller;
 
   @override
   void initState() {
     super.initState();
+
+    _initializeWebView();
+  }
+
+  Future<void> _initializeWebView() async {
+    // --------------------------------------------------
+    // 1. REQUEST ANDROID CAMERA PERMISSION
+    // --------------------------------------------------
+
+    final cameraPermission =
+        await Permission.camera.request();
+
+    debugPrint(
+      '📷 APP CAMERA PERMISSION: $cameraPermission',
+    );
+
+    if (cameraPermission.isGranted) {
+      debugPrint(
+        '✅ Android camera permission granted.',
+      );
+    } else {
+      debugPrint(
+        '❌ Android camera permission was not granted.',
+      );
+    }
+
+    // --------------------------------------------------
+    // 2. BUILD TRY-ON URL
+    // --------------------------------------------------
 
     final url = Uri.parse(
       'https://gonzalesvisionclinic.vercel.app/',
@@ -33,9 +63,15 @@ class _TryOnWebViewScreenState
       },
     );
 
-    debugPrint('TRY-ON URL: $url');
+    debugPrint(
+      'TRY-ON URL: $url',
+    );
 
-    _controller = WebViewController()
+    // --------------------------------------------------
+    // 3. CREATE WEBVIEW CONTROLLER
+    // --------------------------------------------------
+
+    final controller = WebViewController()
       ..setJavaScriptMode(
         JavaScriptMode.unrestricted,
       )
@@ -46,11 +82,13 @@ class _TryOnWebViewScreenState
               'TRY-ON PAGE STARTED: $url',
             );
           },
+
           onPageFinished: (url) {
             debugPrint(
               'TRY-ON PAGE FINISHED: $url',
             );
           },
+
           onWebResourceError: (error) {
             debugPrint(
               'TRY-ON WEBVIEW ERROR: ${error.description}',
@@ -59,34 +97,89 @@ class _TryOnWebViewScreenState
         ),
       );
 
-    // Allow the web page to request camera access.
-    if (_controller.platform is AndroidWebViewController) {
+    // --------------------------------------------------
+    // 4. HANDLE WEBVIEW CAMERA PERMISSION
+    // --------------------------------------------------
+
+    if (controller.platform
+        is AndroidWebViewController) {
       final androidController =
-          _controller.platform as AndroidWebViewController;
+          controller.platform
+              as AndroidWebViewController;
 
       androidController.setOnPlatformPermissionRequest(
-        (request) {
+        (request) async {
           debugPrint(
-            '🌐 WebView permission request: ${request.types}',
+            '🌐 WEBVIEW PERMISSION REQUEST: '
+            '${request.types}',
           );
 
-          request.grant();
+          if (request.types.contains(
+            WebViewPermissionResourceType.camera,
+          )) {
+            final permission =
+                await Permission.camera.status;
+
+            debugPrint(
+              '📷 CURRENT CAMERA STATUS: $permission',
+            );
+
+            if (permission.isGranted) {
+              debugPrint(
+                '✅ GRANTING WEBVIEW CAMERA',
+              );
+
+              await request.grant();
+            } else {
+              debugPrint(
+                '❌ CAMERA NOT GRANTED - DENYING WEBVIEW',
+              );
+
+              await request.deny();
+            }
+          } else {
+            debugPrint(
+              '❌ UNKNOWN WEBVIEW PERMISSION - DENY',
+            );
+
+            await request.deny();
+          }
         },
       );
     }
 
-    _controller.loadRequest(url);
+    // --------------------------------------------------
+    // 5. LOAD WEB TRY-ON
+    // --------------------------------------------------
+
+    await controller.loadRequest(url);
+
+    // --------------------------------------------------
+    // 6. SAVE CONTROLLER
+    // --------------------------------------------------
+
+    if (!mounted) return;
+
+    setState(() {
+      _controller = controller;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Virtual Try-On'),
+        title: const Text(
+          'Virtual Try-On',
+        ),
       ),
-      body: WebViewWidget(
-        controller: _controller,
-      ),
+      body: _controller == null
+          ? const Center(
+              child: CircularProgressIndicator(),
+            )
+          : WebViewWidget(
+              controller: _controller!,
+            ),
     );
   }
 }
