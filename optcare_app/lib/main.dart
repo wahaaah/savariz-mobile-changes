@@ -1979,21 +1979,26 @@ class _DashboardScreenState
 // =====================================================
 // OPEN TRY-ON
 // =====================================================
+void _openTryOn(FrameModel frame) {
+  debugPrint('========== TRY ON WAS CALLED ==========');
+  debugPrint('FRAME: ${frame.name}');
+  debugPrint('FRAME ID: ${frame.frameId}');
 
-  void _openTryOn(
-    FrameModel frame,
-  ) {
-    final uri = Uri.parse(
-      '$tryOnBaseUrl?frameId=${Uri.encodeComponent(frame.frameId.toString())}',
-    );
+  final uri = Uri.parse(
+    '$tryOnBaseUrl?frameId=${Uri.encodeComponent(frame.frameId.toString())}',
+  );
 
-    debugPrint(
-      'OPENING TRY-ON FOR FRAME: ${frame.frameId}',
-    );
+  debugPrint('TRY-ON URL: $uri');
 
-    debugPrint(
-      'TRY-ON URL: $uri',
-    );
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => TryOnWebViewScreen(
+        url: uri,
+        frameName: frame.name,
+      ),
+    ),
+  );
+}
 
     Navigator.of(context).push(
       MaterialPageRoute(
