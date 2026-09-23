@@ -1966,29 +1966,29 @@ class _DashboardScreenState
 // NAVIGATION
 // =====================================================
 
-  void _onItemTapped(
-    int index,
-  ) {
-    setState(() {
-      _selectedIndex =
-          index;
-    });
-  }
+void _onItemTapped(int index) {
+  setState(() {
+    _selectedIndex = index;
+  });
+}
 
 
 // =====================================================
 // OPEN TRY-ON
 // =====================================================
-void _openTryOn(FrameModel frame) {
-  debugPrint('========== TRY ON WAS CALLED ==========');
-  debugPrint('FRAME: ${frame.name}');
-  debugPrint('FRAME ID: ${frame.frameId}');
 
+void _openTryOn(FrameModel frame) {
   final uri = Uri.parse(
     '$tryOnBaseUrl?frameId=${Uri.encodeComponent(frame.frameId.toString())}',
   );
 
-  debugPrint('TRY-ON URL: $uri');
+  debugPrint(
+    'OPENING TRY-ON FOR FRAME: ${frame.frameId}',
+  );
+
+  debugPrint(
+    'TRY-ON URL: $uri',
+  );
 
   Navigator.of(context).push(
     MaterialPageRoute(
@@ -1999,18 +1999,6 @@ void _openTryOn(FrameModel frame) {
     ),
   );
 }
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) =>
-            TryOnWebViewScreen(
-          url: uri,
-          frameName:
-              frame.name,
-        ),
-      ),
-    );
-  }
 
 
 // =====================================================
