@@ -61,54 +61,95 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (picked != null) setState(() => _dob = picked);
   }
 
-  Future<void> _save() async {
-    setState(() => _loading = true);
-    try {
-      final uri = Uri.parse('$apiBaseUrl/update_patient.php');
-      final payload = <String, dynamic>{
-        'patient_id': widget.profile['patient_id'],
-      };
-      payload['first_name'] = _firstNameController.text.trim();
-      payload['last_name'] = _lastNameController.text.trim();
-      payload['email'] = _emailController.text.trim();
-      payload['contact_number'] = _contactController.text.trim();
-      payload['gender'] = _gender;
-      if (_dob != null) {
-        payload['date_of_birth'] = _dob!.toIso8601String().split('T').first;
-      }
+ Future<void> _save() async {
+  setState(() => _loading = true);
 
-      final res = await http
-          .post(uri, headers: _jsonHeaders, body: jsonEncode(payload))
-          .timeout(const Duration(seconds: 15));
-      final Map<String, dynamic> data = jsonDecode(res.body);
-      if (res.statusCode == 200 && data['success'] == true) {
-        // Return updated values to caller so UI can update
-        Navigator.of(context).pop({
-          'first_name': payload['first_name'],
-          'last_name': payload['last_name'],
-          'email': payload['email'],
-          'contact_number': payload['contact_number'],
-          'gender': payload['gender'],
-          'date_of_birth':
-              payload['date_of_birth'] ?? widget.profile['date_of_birth'],
-        });
-        return;
-      }
+  try {
+    final patientId = widget.profile['patient_id']?.toString().trim();
 
-      final msg =
-          (data['message'] ?? data['error'])?.toString() ??
-          'Failed to update profile';
+    if (patientId == null || patientId.isEmpty) {
+      throw Exception('Patient ID is missing.');
+    }
+
+    final uri = Uri.parse(
+      '$apiBaseUrl/api/patients/$patientId',
+    );
+
+    final firstName = _firstNameController.text.trim();
+    final lastName = _lastNameController.text.trim();
+
+    if (firstName.isEmpty) {
+      throw Exception('First name cannot be empty.');
+    }
+
+    if (lastName.isEmpty) {
+      throw Exception('Last name cannot be empty.');
+    }
+
+    final fullName = '$firstName $lastName';
+
+    final payload = <String, dynamic>{
+      'first_name': firstName,
+      'last_name': lastName,
+      'name': fullName,
+      'email': _emailController.text.trim(),
+      'contact_number': _contactController.text.trim(),
+      'gender': _gender,
+    };
+
+    final res = await http
+        .put(
+          uri,
+          headers: _jsonHeaders,
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    final Map<String, dynamic> data = jsonDecode(res.body);
+
+    if (res.statusCode == 200 && data['success'] == true) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
-    } finally {
-      if (mounted) setState(() => _loading = false);
+
+      Navigator.of(context).pop({
+        'first_name': firstName,
+        'last_name': lastName,
+        'name': fullName,
+        'email': _emailController.text.trim(),
+        'contact_number': _contactController.text.trim(),
+        'contact': _contactController.text.trim(),
+        'gender': _gender,
+        'date_of_birth':
+            widget.profile['date_of_birth'],
+      });
+
+      return;
+    }
+
+    final msg =
+        (data['message'] ?? data['error'])?.toString() ??
+        'Failed to update profile';
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
+
+  } catch (e) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error: $e'),
+      ),
+    );
+
+  } finally {
+    if (mounted) {
+      setState(() => _loading = false);
     }
   }
+}
 
   @override
   Widget build(BuildContext context) {
