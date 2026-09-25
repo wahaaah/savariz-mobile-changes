@@ -2661,9 +2661,13 @@ SizedBox(
             ),
             tooltip: 'Notifications',
             onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const NotificationScreen()),
-              );
+             Navigator.of(context).push(
+  MaterialPageRoute(
+    builder: (_) => NotificationScreen(
+      patientId: _profile['patient_id']?.toString() ?? '',
+    ),
+  ),
+);
             },
           ),
           IconButton(

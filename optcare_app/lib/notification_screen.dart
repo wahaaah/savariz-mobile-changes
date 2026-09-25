@@ -3,17 +3,26 @@ import 'package:flutter/material.dart';
 import 'app_notifications.dart';
 
 class NotificationScreen extends StatefulWidget {
-  const NotificationScreen({super.key});
+  final String patientId;
+
+  const NotificationScreen({
+    super.key,
+    required this.patientId,
+  });
 
   @override
-  State<NotificationScreen> createState() => _NotificationScreenState();
+  State<NotificationScreen> createState() =>
+      _NotificationScreenState();
 }
 
 class _NotificationScreenState extends State<NotificationScreen> {
   @override
   void initState() {
     super.initState();
-    notificationsController.load();
+
+    notificationsController.load(
+      widget.patientId,
+    );
   }
 
   @override
@@ -27,14 +36,22 @@ class _NotificationScreenState extends State<NotificationScreen> {
             onPressed: () async {
               await notificationsController.markAllAsRead();
             },
-            child: const Text('Mark all read', style: TextStyle(color: Colors.white)),
+            child: const Text(
+              'Mark all read',
+              style: TextStyle(
+                color: Colors.white,
+              ),
+            ),
           ),
         ],
       ),
+
       body: AnimatedBuilder(
         animation: notificationsController,
         builder: (context, child) {
-          final notifications = notificationsController.notifications;
+          final notifications =
+              notificationsController.notifications;
+
           if (notifications.isEmpty) {
             return const Center(
               child: Text('No notifications yet.'),
@@ -46,15 +63,36 @@ class _NotificationScreenState extends State<NotificationScreen> {
             itemCount: notifications.length,
             itemBuilder: (context, index) {
               final item = notifications[index];
+
               return Card(
-                color: item.isRead ? Colors.white : Colors.blue.shade50,
+                color: item.isRead
+                    ? Colors.white
+                    : Colors.blue.shade50,
                 margin: const EdgeInsets.only(bottom: 12),
+
                 child: ListTile(
-                  title: Text(item.title, style: TextStyle(fontWeight: item.isRead ? FontWeight.normal : FontWeight.bold)),
+                  title: Text(
+                    item.title,
+                    style: TextStyle(
+                      fontWeight: item.isRead
+                          ? FontWeight.normal
+                          : FontWeight.bold,
+                    ),
+                  ),
+
                   subtitle: Text(item.body),
-                  trailing: item.isRead ? null : const Icon(Icons.circle, color: Colors.blue, size: 10),
+
+                  trailing: item.isRead
+                      ? null
+                      : const Icon(
+                          Icons.circle,
+                          color: Colors.blue,
+                          size: 10,
+                        ),
+
                   onTap: () async {
-                    await notificationsController.markAsRead(item.id);
+                    await notificationsController
+                        .markAsRead(item.id);
                   },
                 ),
               );
