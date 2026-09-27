@@ -436,21 +436,33 @@ class _AuthScreenState extends State<AuthScreen> {
                 : 0;
 
         final payload = {
-          'name':
-              '${_firstNameController.text.trim()} '
-                      '${_lastNameController.text.trim()}'
-                  .trim(),
-          'age': calculatedAge,
-          'gender': _selectedGender,
-          'contact':
-              _contactController.text.trim(),
-          'email':
-              _emailController.text
-                  .trim()
-                  .toLowerCase(),
-          'password':
-              _passwordController.text,
-        };
+  'name':
+      '${_firstNameController.text.trim()} '
+              '${_lastNameController.text.trim()}'
+          .trim(),
+
+  'age': calculatedAge,
+
+  'date_of_birth':
+      _selectedDateOfBirth != null
+          ? '${_selectedDateOfBirth!.year.toString().padLeft(4, '0')}-'
+            '${_selectedDateOfBirth!.month.toString().padLeft(2, '0')}-'
+            '${_selectedDateOfBirth!.day.toString().padLeft(2, '0')}'
+          : null,
+
+  'gender': _selectedGender,
+
+  'contact':
+      _contactController.text.trim(),
+
+  'email':
+      _emailController.text
+          .trim()
+          .toLowerCase(),
+
+  'password':
+      _passwordController.text,
+};
 
         debugPrint(
           'REGISTER REQUEST: $uri',
