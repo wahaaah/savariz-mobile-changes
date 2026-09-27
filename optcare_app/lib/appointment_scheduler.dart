@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -34,6 +35,12 @@ class _AppointmentSchedulerScreenState
 
   String? _availabilityError;
 
+  // ============================================================
+  // 10-SECOND AVAILABILITY REFRESH
+  // ============================================================
+
+  Timer? _availabilityRefreshTimer;
+
   /*
   ============================================================
   CLINIC OPERATING TIME SLOTS
@@ -41,6 +48,7 @@ class _AppointmentSchedulerScreenState
   Every 30 minutes
   ============================================================
   */
+
   final List<TimeOfDay> _operatingTimeSlots = [
     const TimeOfDay(hour: 8, minute: 0),
     const TimeOfDay(hour: 8, minute: 30),
@@ -67,10 +75,12 @@ class _AppointmentSchedulerScreenState
   /*
   ============================================================
   BOOKED SLOTS
+
   Format:
   2026-10-01 12:30
   ============================================================
   */
+
   final Set<String> _bookedSlots = {};
 
   /*
@@ -104,7 +114,14 @@ class _AppointmentSchedulerScreenState
 
   /*
   ============================================================
-  CHECK IF TIME HAS ALREADY PASSED TODAY
+  CHECK IF TIME IS TOO CLOSE / PASSED TODAY
+
+  A slot must be unavailable when there are
+  20 minutes or less remaining before the appointment.
+
+  Example:
+  4:09 PM -> 4:30 PM is available
+  4:10 PM -> 4:30 PM is unavailable
   ============================================================
   */
 
@@ -113,17 +130,20 @@ class _AppointmentSchedulerScreenState
       return false;
     }
 
-    final now = TimeOfDay.now();
+    final now = DateTime.now();
 
-    if (time.hour < now.hour) {
-      return true;
-    }
+    final appointmentDateTime = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+      time.hour,
+      time.minute,
+    );
 
-    if (time.hour == now.hour && time.minute <= now.minute) {
-      return true;
-    }
+    final difference =
+        appointmentDateTime.difference(now);
 
-    return false;
+    return difference <= const Duration(minutes: 20);
   }
 
   /*
@@ -134,6 +154,7 @@ class _AppointmentSchedulerScreenState
 
   bool _isSlotBooked(TimeOfDay time) {
     final date = _formatDate(_selectedDate);
+
     final key = '$date ${_timeKey(time)}';
 
     return _bookedSlots.contains(key);
@@ -142,21 +163,39 @@ class _AppointmentSchedulerScreenState
   /*
   ============================================================
   LOAD BOOKED APPOINTMENT SLOTS
+
+  showLoading = true
+      Used for the initial load and date changes.
+
+  showLoading = false
+      Used by the 10-second background refresh.
+
+  IMPORTANT:
+  This function does NOT automatically clear _selectedTime.
+  The selected slot is only removed if it becomes unavailable.
   ============================================================
   */
 
-  Future<void> _loadBookedSlots() async {
+  Future<void> _loadBookedSlots({
+    bool showLoading = true,
+  }) async {
     if (!mounted) return;
 
+    final currentSelectedTime = _selectedTime;
+
     setState(() {
-      _loadingAvailability = true;
+      if (showLoading) {
+        _loadingAvailability = true;
+      }
+
       _availabilityError = null;
+
       _bookedSlots.clear();
-      _selectedTime = null;
     });
 
     try {
-      final uri = Uri.parse('$apiBaseUrl/api/appointments');
+      final uri =
+          Uri.parse('$apiBaseUrl/api/appointments');
 
       debugPrint(
         'APPOINTMENT AVAILABILITY REQUEST: $uri',
@@ -169,14 +208,18 @@ class _AppointmentSchedulerScreenState
               'Accept': 'application/json',
             },
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(
+            const Duration(seconds: 15),
+          );
 
       debugPrint(
-        'APPOINTMENT AVAILABILITY STATUS: ${response.statusCode}',
+        'APPOINTMENT AVAILABILITY STATUS: '
+        '${response.statusCode}',
       );
 
       debugPrint(
-        'APPOINTMENT AVAILABILITY RESPONSE: ${response.body}',
+        'APPOINTMENT AVAILABILITY RESPONSE: '
+        '${response.body}',
       );
 
       if (response.statusCode < 200 ||
@@ -194,35 +237,53 @@ class _AppointmentSchedulerScreenState
         );
       }
 
-      final selectedDateString = _formatDate(_selectedDate);
+      final selectedDateString =
+          _formatDate(_selectedDate);
 
       final booked = <String>{};
 
       for (final item in decoded) {
         if (item is! Map) continue;
 
-        final status = item['appointment_status']
-                ?.toString()
-                .trim()
-                .toLowerCase() ??
-            '';
+        final status =
+            item['appointment_status']
+                    ?.toString()
+                    .trim()
+                    .toLowerCase() ??
+                '';
 
         /*
-        Cancelled appointments should NOT block the slot.
-
-        Requested, Pending, Confirmed, etc.
-        DO block the slot.
+        --------------------------------------------------------
+        CANCELLED APPOINTMENTS DO NOT BLOCK THE SLOT
+        --------------------------------------------------------
         */
+
         if (status == 'cancelled' ||
             status == 'canceled') {
           continue;
         }
 
+        /*
+        --------------------------------------------------------
+        GET APPOINTMENT DATE
+        --------------------------------------------------------
+        */
+
         final rawDate =
-            item['appointment_date']?.toString() ?? '';
+            item['appointment_date']
+                    ?.toString() ??
+                '';
+
+        /*
+        --------------------------------------------------------
+        GET APPOINTMENT TIME
+        --------------------------------------------------------
+        */
 
         final rawTime =
-            item['appointment_time']?.toString() ?? '';
+            item['appointment_time']
+                    ?.toString() ??
+                '';
 
         final appointmentDate =
             rawDate.split('T').first;
@@ -232,10 +293,18 @@ class _AppointmentSchedulerScreenState
                 ? rawTime.substring(0, 5)
                 : rawTime;
 
-        if (appointmentDate == selectedDateString &&
+        /*
+        --------------------------------------------------------
+        ONLY ADD APPOINTMENTS FOR THE SELECTED DATE
+        --------------------------------------------------------
+        */
+
+        if (appointmentDate ==
+                selectedDateString &&
             appointmentTime.isNotEmpty) {
           booked.add(
-            '$appointmentDate $appointmentTime',
+            '$appointmentDate '
+            '$appointmentTime',
           );
         }
       }
@@ -248,8 +317,63 @@ class _AppointmentSchedulerScreenState
           ..addAll(booked);
       });
 
+      /*
+      ========================================================
+      CHECK THE CURRENTLY SELECTED SLOT
+
+      Keep the selected time if it is still available.
+
+      Remove it only when:
+
+      1. Another patient has booked it
+      OR
+      2. The 20-minute cutoff has been reached
+      ========================================================
+      */
+
+      if (currentSelectedTime != null) {
+        final stillAvailable =
+            !_isSlotBooked(
+              currentSelectedTime,
+            ) &&
+            !_isPastTime(
+              currentSelectedTime,
+            );
+
+        if (!stillAvailable &&
+            mounted) {
+          setState(() {
+            _selectedTime = null;
+          });
+
+          ScaffoldMessenger.of(context)
+              .showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Your selected appointment time is no longer available.',
+              ),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        } else if (mounted) {
+          /*
+          Keep the selection.
+
+          This is important because the 10-second
+          refresh should not remove a valid selection.
+          */
+
+          setState(() {
+            _selectedTime =
+                currentSelectedTime;
+          });
+        }
+      }
+
       debugPrint(
-        'BOOKED SLOTS FOR $selectedDateString: $_bookedSlots',
+        'BOOKED SLOTS FOR '
+        '$selectedDateString: '
+        '$_bookedSlots',
       );
     } catch (e, st) {
       debugPrint(
@@ -267,12 +391,41 @@ class _AppointmentSchedulerScreenState
             'Unable to load available appointment times.';
       });
     } finally {
-      if (mounted) {
+      if (mounted && showLoading) {
         setState(() {
           _loadingAvailability = false;
         });
       }
     }
+  }
+
+  /*
+  ============================================================
+  10-SECOND BACKGROUND REFRESH
+
+  This refreshes availability without showing the
+  loading spinner.
+
+  The selected time remains selected if it is still
+  available.
+  ============================================================
+  */
+
+  Future<void> _refreshAvailability() async {
+    if (!mounted) return;
+
+    /*
+    Do not start another request if the previous
+    availability request is still running.
+    */
+
+    if (_loadingAvailability) {
+      return;
+    }
+
+    await _loadBookedSlots(
+      showLoading: false,
+    );
   }
 
   /*
@@ -285,7 +438,25 @@ class _AppointmentSchedulerScreenState
   void initState() {
     super.initState();
 
+    /*
+    Initial availability fetch.
+    */
+
     _loadBookedSlots();
+
+    /*
+    ------------------------------------------------------------
+    REFRESH AVAILABILITY EVERY 10 SECONDS
+    ------------------------------------------------------------
+    */
+
+    _availabilityRefreshTimer =
+        Timer.periodic(
+      const Duration(seconds: 10),
+      (_) {
+        _refreshAvailability();
+      },
+    );
   }
 
   /*
@@ -315,6 +486,7 @@ class _AppointmentSchedulerScreenState
           ),
         ),
       );
+
       return;
     }
 
@@ -328,7 +500,7 @@ class _AppointmentSchedulerScreenState
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'That appointment time has already passed.',
+            'That appointment time is no longer available.',
           ),
         ),
       );
@@ -406,7 +578,9 @@ class _AppointmentSchedulerScreenState
 
     try {
       final uri =
-          Uri.parse('$apiBaseUrl/api/appointments');
+          Uri.parse(
+        '$apiBaseUrl/api/appointments',
+      );
 
       final appointmentDate =
           _formatDate(_selectedDate);
@@ -415,8 +589,10 @@ class _AppointmentSchedulerScreenState
           _toMysqlTime(_selectedTime!);
 
       /*
-      Admin scheduler expects the purpose in one field.
+      Admin scheduler expects the purpose
+      in one field.
       */
+
       final purposeOfVisit =
           '$appointmentType - $provider';
 
@@ -436,21 +612,34 @@ class _AppointmentSchedulerScreenState
           .post(
             uri,
             headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
+              'Content-Type':
+                  'application/json',
+              'Accept':
+                  'application/json',
             },
             body: jsonEncode({
               'patient_id': patientId,
-              'appointment_date': appointmentDate,
-              'appointment_time': appointmentTime,
-              'purpose_of_visit': purposeOfVisit,
+
+              'appointment_date':
+                  appointmentDate,
+
+              'appointment_time':
+                  appointmentTime,
+
+              'purpose_of_visit':
+                  purposeOfVisit,
 
               /*
-              IMPORTANT:
-              This puts the appointment into the
-              admin Incoming Mobile Bookings queue.
+              --------------------------------------------------
+              REQUESTED STATUS
+              --------------------------------------------------
+
+              This places the appointment into
+              the admin incoming bookings queue.
               */
-              'appointment_status': 'Requested',
+
+              'appointment_status':
+                  'Requested',
             }),
           )
           .timeout(
@@ -467,15 +656,18 @@ class _AppointmentSchedulerScreenState
         '${response.body}',
       );
 
-      final body = response.body.trim();
+      final body =
+          response.body.trim();
 
       Map<String, dynamic> data = {};
 
       if (body.isNotEmpty) {
         try {
-          final decoded = jsonDecode(body);
+          final decoded =
+              jsonDecode(body);
 
-          if (decoded is Map<String, dynamic>) {
+          if (decoded
+              is Map<String, dynamic>) {
             data = decoded;
           }
         } catch (_) {
@@ -489,13 +681,14 @@ class _AppointmentSchedulerScreenState
       if (!mounted) return;
 
       /*
-      ----------------------------------------------------------
+      ========================================================
       SUCCESS
-      ----------------------------------------------------------
+      ========================================================
       */
 
       if (response.statusCode == 201) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
           const SnackBar(
             content: Text(
               'Appointment request sent successfully!',
@@ -511,22 +704,24 @@ class _AppointmentSchedulerScreenState
         });
 
         /*
-        Refresh availability so the newly requested
-        slot becomes unavailable immediately.
+        Refresh immediately so the newly requested
+        appointment slot becomes unavailable.
         */
+
         await _loadBookedSlots();
 
         await widget.onScheduled();
       }
 
       /*
-      ----------------------------------------------------------
+      ========================================================
       SLOT ALREADY RESERVED
-      ----------------------------------------------------------
+      ========================================================
       */
 
       else if (response.statusCode == 409) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
           SnackBar(
             content: Text(
               data['error']?.toString() ??
@@ -539,13 +734,14 @@ class _AppointmentSchedulerScreenState
       }
 
       /*
-      ----------------------------------------------------------
+      ========================================================
       BAD REQUEST
-      ----------------------------------------------------------
+      ========================================================
       */
 
       else if (response.statusCode == 400) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
           SnackBar(
             content: Text(
               data['error']?.toString() ??
@@ -556,13 +752,14 @@ class _AppointmentSchedulerScreenState
       }
 
       /*
-      ----------------------------------------------------------
+      ========================================================
       OTHER SERVER ERROR
-      ----------------------------------------------------------
+      ========================================================
       */
 
       else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
           SnackBar(
             content: Text(
               data['error']?.toString() ??
@@ -583,7 +780,8 @@ class _AppointmentSchedulerScreenState
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
         SnackBar(
           content: Text(
             'Unable to send appointment request: $e',
@@ -607,6 +805,14 @@ class _AppointmentSchedulerScreenState
 
   @override
   void dispose() {
+    /*
+    IMPORTANT:
+    Stop the 10-second refresh when leaving
+    the appointment screen.
+    */
+
+    _availabilityRefreshTimer?.cancel();
+
     _providerController.dispose();
     _appointmentTypeController.dispose();
 
@@ -622,27 +828,39 @@ class _AppointmentSchedulerScreenState
   Widget _buildHeader() {
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
+        borderRadius:
+            BorderRadius.circular(24),
+
+        gradient:
+            const LinearGradient(
           colors: [
             Color(0xFF0F76FF),
             Color(0xFF409CFF),
           ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          begin:
+              Alignment.topLeft,
+          end:
+              Alignment.bottomRight,
         ),
-        boxShadow: const [
+
+        boxShadow:
+            const [
           BoxShadow(
             color: Colors.black12,
             blurRadius: 20,
-            offset: Offset(0, 10),
+            offset:
+                Offset(0, 10),
           ),
         ],
       ),
-      padding: const EdgeInsets.all(24),
+
+      padding:
+          const EdgeInsets.all(24),
+
       child: Column(
         crossAxisAlignment:
             CrossAxisAlignment.center,
+
         children: [
           const Icon(
             Icons.calendar_today,
@@ -654,11 +872,14 @@ class _AppointmentSchedulerScreenState
 
           const Text(
             'Pick a date on the calendar',
-            textAlign: TextAlign.center,
+            textAlign:
+                TextAlign.center,
+
             style: TextStyle(
               color: Colors.white,
               fontSize: 22,
-              fontWeight: FontWeight.bold,
+              fontWeight:
+                  FontWeight.bold,
             ),
           ),
 
@@ -669,8 +890,12 @@ class _AppointmentSchedulerScreenState
             '${_selectedDate.day}/'
             '${_selectedDate.month}/'
             '${_selectedDate.year}',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
+
+            textAlign:
+                TextAlign.center,
+
+            style:
+                const TextStyle(
               color: Colors.white70,
               fontSize: 16,
             ),
@@ -694,27 +919,53 @@ class _AppointmentSchedulerScreenState
     );
 
     return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
+      shape:
+          RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.circular(24),
       ),
+
       elevation: 3,
+
       child: Padding(
-        padding: const EdgeInsets.symmetric(
+        padding:
+            const EdgeInsets.symmetric(
           vertical: 16,
           horizontal: 12,
         ),
-        child: CalendarDatePicker(
-          initialDate: _selectedDate,
-          firstDate: today,
-          lastDate: today.add(
-            const Duration(days: 365),
+
+        child:
+            CalendarDatePicker(
+          initialDate:
+              _selectedDate,
+
+          firstDate:
+              today,
+
+          lastDate:
+              today.add(
+            const Duration(
+              days: 365,
+            ),
           ),
-          currentDate: today,
-          onDateChanged: (date) async {
+
+          currentDate:
+              today,
+
+          onDateChanged:
+              (date) async {
             setState(() {
-              _selectedDate = date;
-              _selectedTime = null;
+              _selectedDate =
+                  date;
+
+              _selectedTime =
+                  null;
             });
+
+            /*
+            Immediately load availability
+            for the newly selected date.
+            */
 
             await _loadBookedSlots();
           },
@@ -731,21 +982,30 @@ class _AppointmentSchedulerScreenState
 
   Widget _buildTimeCard() {
     return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
+      shape:
+          RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.circular(24),
       ),
+
       elevation: 3,
+
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding:
+            const EdgeInsets.all(20),
+
         child: Column(
           crossAxisAlignment:
               CrossAxisAlignment.start,
+
           children: [
             const Text(
               'Select appointment time',
+
               style: TextStyle(
                 fontSize: 18,
-                fontWeight: FontWeight.bold,
+                fontWeight:
+                    FontWeight.bold,
               ),
             ),
 
@@ -754,6 +1014,7 @@ class _AppointmentSchedulerScreenState
             const Text(
               'Available clinic hours: '
               '8:00 AM - 5:30 PM',
+
               style: TextStyle(
                 fontSize: 13,
                 color: Colors.grey,
@@ -765,25 +1026,40 @@ class _AppointmentSchedulerScreenState
             if (_loadingAvailability)
               const Center(
                 child: Padding(
-                  padding: EdgeInsets.all(20),
-                  child: CircularProgressIndicator(),
+                  padding:
+                      EdgeInsets.all(20),
+
+                  child:
+                      CircularProgressIndicator(),
                 ),
               )
 
-            else if (_availabilityError != null)
+            else if (_availabilityError !=
+                null)
               Container(
-                width: double.infinity,
+                width:
+                    double.infinity,
+
                 padding:
                     const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+
+                decoration:
+                    BoxDecoration(
+                  color:
+                      Colors.red.shade50,
+
                   borderRadius:
-                      BorderRadius.circular(12),
+                      BorderRadius.circular(
+                    12,
+                  ),
                 ),
+
                 child: Text(
                   _availabilityError!,
+
                   style: TextStyle(
-                    color: Colors.red.shade700,
+                    color:
+                        Colors.red.shade700,
                     fontSize: 13,
                   ),
                 ),
@@ -793,116 +1069,151 @@ class _AppointmentSchedulerScreenState
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
+
                 children:
-                    _operatingTimeSlots.map((time) {
-                  final booked =
-                      _isSlotBooked(time);
+                    _operatingTimeSlots
+                        .map(
+                  (time) {
+                    final booked =
+                        _isSlotBooked(
+                      time,
+                    );
 
-                  final past =
-                      _isPastTime(time);
+                    final past =
+                        _isPastTime(
+                      time,
+                    );
 
-                  final disabled =
-                      booked || past;
+                    final disabled =
+                        booked || past;
 
-                  final selected =
-                      _selectedTime != null &&
-                      _selectedTime!.hour ==
-                          time.hour &&
-                      _selectedTime!.minute ==
-                          time.minute;
+                    final selected =
+                        _selectedTime !=
+                                null &&
+                            _selectedTime!
+                                    .hour ==
+                                time.hour &&
+                            _selectedTime!
+                                    .minute ==
+                                time.minute;
 
-                  return SizedBox(
-                    width: 105,
-                    child: OutlinedButton(
-                      onPressed: disabled
-                          ? null
-                          : () {
-                              setState(() {
-                                _selectedTime =
-                                    time;
-                              });
-                            },
-                      style:
-                          OutlinedButton.styleFrom(
-                        padding:
-                            const EdgeInsets
-                                .symmetric(
-                          vertical: 12,
-                        ),
+                    return SizedBox(
+                      width: 105,
 
-                        backgroundColor:
-                            selected
+                      child:
+                          OutlinedButton(
+                        onPressed:
+                            disabled
+                                ? null
+                                : () {
+                                    setState(
+                                      () {
+                                        _selectedTime =
+                                            time;
+                                      },
+                                    );
+                                  },
+
+                        style:
+                            OutlinedButton
+                                .styleFrom(
+                          padding:
+                              const EdgeInsets
+                                  .symmetric(
+                            vertical: 12,
+                          ),
+
+                          backgroundColor:
+                              selected
+                                  ? const Color(
+                                      0xFF0F76FF,
+                                    )
+                                  : disabled
+                                      ? Colors
+                                          .grey
+                                          .shade100
+                                      : Colors
+                                          .white,
+
+                          foregroundColor:
+                              selected
+                                  ? Colors
+                                      .white
+                                  : disabled
+                                      ? Colors
+                                          .grey
+                                      : const Color(
+                                          0xFF0F76FF,
+                                        ),
+
+                          side:
+                              BorderSide(
+                            color: selected
                                 ? const Color(
                                     0xFF0F76FF,
                                   )
                                 : disabled
-                                    ? Colors.grey
-                                        .shade100
-                                    : Colors.white,
-
-                        foregroundColor:
-                            selected
-                                ? Colors.white
-                                : disabled
-                                    ? Colors.grey
+                                    ? Colors
+                                        .grey
+                                        .shade300
                                     : const Color(
                                         0xFF0F76FF,
                                       ),
-
-                        side: BorderSide(
-                          color: selected
-                              ? const Color(
-                                  0xFF0F76FF,
-                                )
-                              : disabled
-                                  ? Colors.grey
-                                      .shade300
-                                  : const Color(
-                                      0xFF0F76FF,
-                                    ),
-                        ),
-
-                        shape:
-                            RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius
-                                  .circular(12),
-                        ),
-                      ),
-
-                      child: Column(
-                        children: [
-                          Text(
-                            time.format(context),
-                            style:
-                                const TextStyle(
-                              fontWeight:
-                                  FontWeight.w600,
-                            ),
                           ),
 
-                          if (booked)
-                            const Text(
-                              'Reserved',
-                              style:
-                                  TextStyle(
-                                fontSize: 10,
-                              ),
-                            )
+                          shape:
+                              RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius
+                                    .circular(
+                              12,
+                            ),
+                          ),
+                        ),
 
-                          else if (past)
-                            const Text(
-                              'Passed',
+                        child:
+                            Column(
+                          children: [
+                            Text(
+                              time.format(
+                                context,
+                              ),
+
                               style:
-                                  TextStyle(
-                                fontSize: 10,
+                                  const TextStyle(
+                                fontWeight:
+                                    FontWeight
+                                        .w600,
                               ),
                             ),
-                        ],
+
+                            if (booked)
+                              const Text(
+                                'Reserved',
+
+                                style:
+                                    TextStyle(
+                                  fontSize:
+                                      10,
+                                ),
+                              )
+
+                            else if (past)
+                              const Text(
+                                'Passed',
+
+                                style:
+                                    TextStyle(
+                                  fontSize:
+                                      10,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                }).toList(),
+                    );
+                  },
+                ).toList(),
               ),
           ],
         ),
@@ -918,32 +1229,47 @@ class _AppointmentSchedulerScreenState
 
   Widget _buildInputCard() {
     return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
+      shape:
+          RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.circular(24),
       ),
+
       elevation: 3,
+
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding:
+            const EdgeInsets.all(20),
+
         child: Column(
           crossAxisAlignment:
               CrossAxisAlignment.stretch,
+
           children: [
             const Text(
               'Appointment details',
+
               style: TextStyle(
                 fontSize: 18,
-                fontWeight: FontWeight.bold,
+                fontWeight:
+                    FontWeight.bold,
               ),
             ),
 
             const SizedBox(height: 14),
 
             TextField(
-              controller: _providerController,
+              controller:
+                  _providerController,
+
               decoration:
                   const InputDecoration(
-                labelText: 'Provider',
-                border: OutlineInputBorder(),
+                labelText:
+                    'Provider',
+
+                border:
+                    OutlineInputBorder(),
+
                 prefixIcon:
                     Icon(Icons.person),
               ),
@@ -954,12 +1280,17 @@ class _AppointmentSchedulerScreenState
             TextField(
               controller:
                   _appointmentTypeController,
+
               decoration:
                   const InputDecoration(
                 labelText:
                     'Appointment type',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(
+
+                border:
+                    OutlineInputBorder(),
+
+                prefixIcon:
+                    Icon(
                   Icons.medical_services,
                 ),
               ),
@@ -979,7 +1310,9 @@ class _AppointmentSchedulerScreenState
   Widget _buildActionButton() {
     return SizedBox(
       height: 52,
-      child: ElevatedButton(
+
+      child:
+          ElevatedButton(
         onPressed:
             _creatingAppointment
                 ? null
@@ -988,27 +1321,34 @@ class _AppointmentSchedulerScreenState
         style:
             ElevatedButton.styleFrom(
           backgroundColor:
-              const Color(0xFF0F76FF),
+              const Color(
+            0xFF0F76FF,
+          ),
 
           shape:
               RoundedRectangleBorder(
             borderRadius:
-                BorderRadius.circular(18),
+                BorderRadius.circular(
+              18,
+            ),
           ),
         ),
 
-        child: _creatingAppointment
-            ? const CircularProgressIndicator(
-                color: Colors.white,
-              )
-            : const Text(
-                'Confirm Appointment',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight:
-                      FontWeight.bold,
-                ),
-              ),
+        child:
+            _creatingAppointment
+                ? const CircularProgressIndicator(
+                    color:
+                        Colors.white,
+                  )
+                : const Text(
+                    'Confirm Appointment',
+
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight:
+                          FontWeight.bold,
+                    ),
+                  ),
       ),
     );
   }
@@ -1020,41 +1360,64 @@ class _AppointmentSchedulerScreenState
   */
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(
+    BuildContext context,
+  ) {
     return Scaffold(
-      appBar: AppBar(
+      appBar:
+          AppBar(
         title:
-            const Text('Appointment Scheduler'),
+            const Text(
+          'Appointment Scheduler',
+        ),
+
         backgroundColor:
-            const Color(0xFF0F76FF),
+            const Color(
+          0xFF0F76FF,
+        ),
+
         elevation: 0,
       ),
 
-      body: SafeArea(
-        child: SingleChildScrollView(
+      body:
+          SafeArea(
+        child:
+            SingleChildScrollView(
           padding:
-              const EdgeInsets.all(16),
+              const EdgeInsets.all(
+            16,
+          ),
 
-          child: Column(
+          child:
+              Column(
             crossAxisAlignment:
-                CrossAxisAlignment.stretch,
+                CrossAxisAlignment
+                    .stretch,
 
             children: [
               _buildHeader(),
 
-              const SizedBox(height: 20),
+              const SizedBox(
+                height: 20,
+              ),
 
               _buildCalendarCard(),
 
-              const SizedBox(height: 16),
+              const SizedBox(
+                height: 16,
+              ),
 
               _buildTimeCard(),
 
-              const SizedBox(height: 16),
+              const SizedBox(
+                height: 16,
+              ),
 
               _buildInputCard(),
 
-              const SizedBox(height: 24),
+              const SizedBox(
+                height: 24,
+              ),
 
               _buildActionButton(),
             ],
