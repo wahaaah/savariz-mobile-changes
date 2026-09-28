@@ -3474,33 +3474,32 @@ class _DashboardScreenState
     );
   }
 
-  String _formatProfileDate(
-      dynamic value) {
-    if (value == null ||
-        value.toString().trim().isEmpty) {
-      return '-';
-    }
+  String _formatProfileDate(dynamic value) {
+  if (value == null || value.toString().trim().isEmpty) {
+    return '-';
+  }
 
-    final parsed =
-        DateTime.tryParse(
-      value.toString(),
-    );
+  final rawValue = value.toString().trim();
 
-    if (parsed == null) {
-      return value.toString();
-    }
+  // Try to parse normal database date/datetime values.
+  final parsed = DateTime.tryParse(rawValue);
 
-    final datePart =
-        '${parsed.day.toString().padLeft(2, '0')}/'
+  if (parsed != null) {
+    return '${parsed.day.toString().padLeft(2, '0')}/'
         '${parsed.month.toString().padLeft(2, '0')}/'
         '${parsed.year}';
-
-    final timePart =
-        '${parsed.hour.toString().padLeft(2, '0')}:'
-        '${parsed.minute.toString().padLeft(2, '0')}';
-
-    return '$datePart at $timePart';
   }
+
+  // Fallback for values that may already contain
+  // something like "04/08/2004 at 00:00".
+  final cleaned = rawValue.split(' at ').first.trim();
+
+  if (cleaned.isEmpty) {
+    return '-';
+  }
+
+  return cleaned;
+}
 
   // =====================================================
   // PROFILE TAB
