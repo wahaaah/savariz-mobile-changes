@@ -55,7 +55,7 @@ class _TryOnWebViewScreenState
     // --------------------------------------------------
 
     final url = Uri.parse(
-      'https://gonzalesvisionclinic.vercel.app/',
+      'https://gonzalesvisionclinic.com',
     ).replace(
       queryParameters: {
         'frameId': widget.frameId.toString(),
