@@ -1862,239 +1862,384 @@ class _DashboardScreenState
 
   Widget _buildHomeTab() {
     final firstName =
-        (_profile['first_name']
-                as String?) ??
-            '';
-
+        (_profile['first_name'] as String?)?.trim() ?? '';
     final lastName =
-        (_profile['last_name']
-                as String?) ??
-            '';
+        (_profile['last_name'] as String?)?.trim() ?? '';
 
-    var userName =
-        '$firstName $lastName'.trim();
+    var userName = '$firstName $lastName'.trim();
 
     if (userName.isEmpty) {
-      userName =
-          (_profile['email']
-                  as String?) ??
-              'Patient';
+      userName = (_profile['email'] as String?)?.trim() ?? 'Patient';
+    }
+
+    final patientId =
+        _profile['patient_id']?.toString().trim() ?? '';
+
+    final emailVerified =
+        _profile['email_verified'] == true ||
+        _profile['email_verified']?.toString() == '1';
+
+    String lastVisitText = 'No visit recorded';
+    final rawLastVisit = _profile['last_visit'];
+
+    if (rawLastVisit != null &&
+        rawLastVisit.toString().trim().isNotEmpty) {
+      final parsed = DateTime.tryParse(rawLastVisit.toString());
+      if (parsed != null) {
+        lastVisitText = _formatProfileDate(parsed.toIso8601String());
+      } else {
+        lastVisitText = rawLastVisit.toString();
+      }
+    }
+
+    String daysSinceVisit = '—';
+    if (rawLastVisit != null &&
+        rawLastVisit.toString().trim().isNotEmpty) {
+      final parsed = DateTime.tryParse(rawLastVisit.toString());
+      if (parsed != null) {
+        final days = DateTime.now().difference(parsed.toLocal()).inDays;
+        daysSinceVisit = days < 0 ? '0' : days.toString();
+      }
     }
 
     return Padding(
       padding: const EdgeInsets.all(16),
       child: ListView(
         children: [
+          // =====================================================
+          // WELCOME HEADER
+          // =====================================================
           Container(
             decoration: BoxDecoration(
-              color:
-                  const Color(0xFF0F76FF),
-              borderRadius:
-                  BorderRadius.circular(20),
-            ),
-            padding:
-                const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Search lenses, frames...',
-                  style: TextStyle(
-                    color: Colors.white70,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Material(
-                  borderRadius:
-                      BorderRadius.circular(
-                    14,
-                  ),
-                  child: TextField(
-                    decoration:
-                        InputDecoration(
-                      filled: true,
-                      fillColor:
-                          Colors.white,
-                      hintText:
-                          'Search lenses, frames...',
-                      prefixIcon:
-                          const Icon(
-                        Icons.search,
-                        color: Colors.blue,
-                      ),
-                      border:
-                          OutlineInputBorder(
-                        borderRadius:
-                            BorderRadius
-                                .circular(14),
-                        borderSide:
-                            BorderSide.none,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius:
-                  BorderRadius.circular(22),
+              gradient: const LinearGradient(
+                colors: [
+                  Color(0xFF0F76FF),
+                  Color(0xFF0757C9),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(24),
               boxShadow: const [
                 BoxShadow(
                   color: Colors.black12,
-                  blurRadius: 20,
+                  blurRadius: 18,
                   offset: Offset(0, 8),
                 ),
               ],
             ),
-            padding:
-                const EdgeInsets.symmetric(
-              horizontal: 24,
-              vertical: 28,
-            ),
+            padding: const EdgeInsets.all(22),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(
-                  Icons.visibility,
-                  size: 44,
-                  color:
-                      Color(0xFF0F76FF),
+                Row(
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.visibility_outlined,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Welcome back,',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            userName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  'Welcome to Gonzales Vision Clinic, $userName',
-                  style:
-                      const TextStyle(
-                    fontSize: 22,
-                    fontWeight:
-                        FontWeight.bold,
-                    color:
-                        Colors.black87,
-                  ),
-                  textAlign:
-                      TextAlign.center,
-                ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 20),
                 const Text(
-                  'Your complete eye care dashboard',
-                  textAlign:
-                      TextAlign.center,
+                  'Your eye care dashboard',
                   style: TextStyle(
-                    fontSize: 14,
-                    color:
-                        Colors.black54,
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Manage appointments, explore frames, and keep your clinic information up to date.',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    height: 1.45,
+                  ),
+                ),
+                if (patientId.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.badge_outlined,
+                          color: Colors.white,
+                          size: 17,
+                        ),
+                        const SizedBox(width: 7),
+                        Text(
+                          'Patient ID: $patientId',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // =====================================================
+          // ACCOUNT STATUS
+          // =====================================================
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: emailVerified
+                        ? Colors.green.withValues(alpha: 0.10)
+                        : Colors.orange.withValues(alpha: 0.10),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    emailVerified
+                        ? Icons.verified_outlined
+                        : Icons.info_outline,
+                    color: emailVerified
+                        ? Colors.green
+                        : Colors.orange,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        emailVerified
+                            ? 'Email verified'
+                            : 'Email verification required',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        (_profile['email'] ?? '').toString(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (emailVerified)
+                  const Icon(
+                    Icons.check_circle,
+                    color: Colors.green,
+                    size: 22,
+                  ),
               ],
             ),
           ),
           const SizedBox(height: 20),
+
+          const Text(
+            'Quick actions',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+
           GridView.count(
             crossAxisCount: 2,
             mainAxisSpacing: 12,
             crossAxisSpacing: 12,
-            childAspectRatio: 1.4,
+            childAspectRatio: 1.35,
             shrinkWrap: true,
-            physics:
-                const NeverScrollableScrollPhysics(),
+            physics: const NeverScrollableScrollPhysics(),
             children: [
               _DashboardTile(
-                label:
-                    'Appointment Scheduler',
-                icon:
-                    Icons.calendar_month,
+                label: 'Book Appointment',
+                icon: Icons.calendar_month,
                 onTap: () {
-                  Navigator.of(context)
-                      .push(
+                  Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) =>
-                          AppointmentSchedulerScreen(
-                        patientId:
-                            _profile[
-                                'patient_id'],
-                        onScheduled:
-                            _loadAppointments,
+                      builder: (_) => AppointmentSchedulerScreen(
+                        patientId: _profile['patient_id'],
+                        onScheduled: _loadAppointments,
                       ),
                     ),
                   );
                 },
               ),
               _DashboardTile(
-                label: 'Frame Models',
-                icon: Icons.grid_view,
-                onTap: () =>
-                    _onItemTapped(1),
+                label: 'Explore Frames',
+                icon: Icons.grid_view_rounded,
+                onTap: () => _onItemTapped(1),
               ),
               _DashboardTile(
                 label: 'My Profile',
-                icon: Icons.person,
-                onTap: () =>
-                    _onItemTapped(3),
+                icon: Icons.person_outline,
+                onTap: () => _onItemTapped(3),
               ),
               _DashboardTile(
-                label: 'Appointments',
-                icon:
-                    Icons.event_available,
-                onTap: () =>
-                    _onItemTapped(2),
+                label: 'My Appointments',
+                icon: Icons.event_available_outlined,
+                onTap: () => _onItemTapped(2),
               ),
             ],
           ),
           const SizedBox(height: 20),
+
+          // =====================================================
+          // APPOINTMENT SUMMARY
+          // =====================================================
+          const Text(
+            'Your clinic activity',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
           Row(
-            mainAxisAlignment:
-                MainAxisAlignment
-                    .spaceBetween,
             children: [
-              _SummaryTile(
-                value:
-                    _appointments.length
-                        .toString(),
-                label:
-                    'Total booked visits',
+              Expanded(
+                child: _SummaryTile(
+                  value: _appointments.length.toString(),
+                  label: 'Booked visits',
+                ),
               ),
-
-              // =================================================
-              // FIXED:
-              // Backend "approved" is normalized
-              // to Flutter "Confirmed".
-              // =================================================
-
-              _SummaryTile(
-                value: _appointments
-                    .where((item) {
-                  final data =
-                      item
-                          as Map<String,
-                              dynamic>;
-
-                  final status =
-                      normalizeAppointmentStatus(
-                    data[
-                            'appointment_status'] ??
-                        data['status'],
-                  );
-
-                  return status
-                          .toLowerCase() ==
-                      'confirmed';
-                })
-                    .length
-                    .toString(),
-                label:
-                    'Upcoming confirmed',
+              const SizedBox(width: 10),
+              Expanded(
+                child: _SummaryTile(
+                  value: _appointments.where((item) {
+                    final data = item as Map<String, dynamic>;
+                    final status = normalizeAppointmentStatus(
+                      data['appointment_status'] ?? data['status'],
+                    );
+                    return status.toLowerCase() == 'confirmed';
+                  }).length.toString(),
+                  label: 'Confirmed',
+                ),
               ),
-
-              const _SummaryTile(
-                value: '12',
-                label:
-                    'Days Since Last Visit',
+              const SizedBox(width: 10),
+              Expanded(
+                child: _SummaryTile(
+                  value: daysSinceVisit,
+                  label: 'Days since visit',
+                ),
               ),
             ],
+          ),
+          const SizedBox(height: 20),
+
+          // =====================================================
+          // LAST VISIT
+          // =====================================================
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F76FF).withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.history_outlined,
+                    color: Color(0xFF0F76FF),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Last clinic visit',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.black54,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        lastVisitText,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -3362,163 +3507,358 @@ class _DashboardScreenState
   // =====================================================
 
   Widget _buildProfileTab() {
-    return ListView(
-      padding:
-          const EdgeInsets.all(16),
-      children: [
-        Card(
-          shape:
-              RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(22),
-          ),
-          child: Padding(
-            padding:
-                const EdgeInsets.all(24),
+    final firstName =
+        (_profile['first_name'] as String?)?.trim() ?? '';
+    final lastName =
+        (_profile['last_name'] as String?)?.trim() ?? '';
+    final fullName = '$firstName $lastName'.trim().isNotEmpty
+        ? '$firstName $lastName'.trim()
+        : (_profile['name']?.toString().trim().isNotEmpty == true
+            ? _profile['name'].toString().trim()
+            : 'Patient');
+
+    final initials = fullName
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .take(2)
+        .map((part) => part[0].toUpperCase())
+        .join();
+
+    final email = _profile['email']?.toString().trim() ?? '';
+    final contact =
+        (_profile['contact_number'] ?? _profile['contact'] ?? '')
+            .toString()
+            .trim();
+    final patientId =
+        _profile['patient_id']?.toString().trim() ?? '-';
+    final gender = _profile['gender']?.toString().trim() ?? '';
+    final age = _profile['age']?.toString().trim() ?? '';
+    final status =
+        _profile['status']?.toString().trim().isNotEmpty == true
+            ? _profile['status'].toString().trim()
+            : 'Active';
+
+    final emailVerified =
+        _profile['email_verified'] == true ||
+        _profile['email_verified']?.toString() == '1';
+
+    final dateOfBirth = _profile['date_of_birth']?.toString();
+    final lastVisit = _profile['last_visit']?.toString();
+
+    return RefreshIndicator(
+      onRefresh: _refreshProfile,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+        children: [
+          // =====================================================
+          // PROFILE HEADER
+          // =====================================================
+          Container(
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [
+                  Color(0xFF0F76FF),
+                  Color(0xFF0757C9),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black12,
+                  blurRadius: 18,
+                  offset: Offset(0, 8),
+                ),
+              ],
+            ),
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     CircleAvatar(
-                      radius: 28,
-                      backgroundColor:
-                          const Color(
-                        0xFF0F76FF,
-                      ),
+                      radius: 34,
+                      backgroundColor: Colors.white,
                       child: Text(
-                        _profile[
-                                    'first_name']
-                                ?[0] ??
-                            'O',
-                        style:
-                            const TextStyle(
-                          color:
-                              Colors.white,
-                          fontSize: 24,
+                        initials.isEmpty ? 'P' : initials,
+                        style: const TextStyle(
+                          color: Color(0xFF0F76FF),
+                          fontSize: 23,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
-                    const SizedBox(
-                        width: 16),
+                    const SizedBox(width: 14),
                     Expanded(
                       child: Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment
-                                .start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '${_profile['first_name']} ${_profile['last_name']}',
-                            style:
-                                const TextStyle(
-                              fontSize:
-                                  20,
-                              fontWeight:
-                                  FontWeight
-                                      .bold,
+                            fullName,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                          const SizedBox(
-                              height: 4),
+                          const SizedBox(height: 5),
                           Text(
-                            _profile[
-                                    'email'] ??
-                                '',
-                            style:
-                                const TextStyle(
-                              color:
-                                  Colors.grey,
+                            email.isEmpty ? 'No email address' : email,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 9),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: emailVerified
+                                  ? Colors.white.withValues(alpha: 0.16)
+                                  : Colors.orange.withValues(alpha: 0.22),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  emailVerified
+                                      ? Icons.verified_outlined
+                                      : Icons.info_outline,
+                                  size: 15,
+                                  color: Colors.white,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  emailVerified
+                                      ? 'Email verified'
+                                      : 'Email not verified',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
                     ),
-
-                    // Edit profile button
-                    TextButton(
-                      onPressed: () async {
-                        final result =
-                            await Navigator
-                                .of(context)
-                                .push<
-                                    Map<String,
-                                        dynamic>>(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                EditProfileScreen(
-                              profile:
-                                  _profile,
-                            ),
-                          ),
-                        );
-
-                        if (result != null &&
-                            mounted) {
-                          setState(() {
-                            _profile = {
-                              ..._profile,
-                              ...result,
-                            };
-                          });
-                        }
-                      },
-                      child:
-                          const Text(
-                        'Edit profile',
-                        style:
-                            TextStyle(
-                          color:
-                              Color(
-                            0xFF0F76FF,
-                          ),
-                          fontWeight:
-                              FontWeight.w600,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
-                const SizedBox(
-                    height: 24),
-                _ProfileDetail(
-                  label:
-                      'Patient ID',
-                  value:
-                      _profile[
-                                  'patient_id']
-                              ?.toString() ??
-                          '-',
-                ),
-                _ProfileDetail(
-                  label: 'Contact',
-                  value:
-                      ((_profile[
-                                      'contact_number'] ??
-                                  '')
-                              .toString()
-                              .trim()
-                              .isEmpty)
-                          ? '-'
-                          : (_profile[
-                                      'contact_number'] ??
-                                  '-')
-                              .toString(),
-                ),
-                _ProfileDetail(
-                  label:
-                      'Registered',
-                  value:
-                      _formatProfileDate(
-                    _profile[
-                        'created_at'],
+                const SizedBox(height: 18),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 11,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.badge_outlined,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Patient ID',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        patientId,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: 14),
+
+          // =====================================================
+          // EDIT PROFILE
+          // =====================================================
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                final result = await Navigator.of(context).push<
+                    Map<String, dynamic>>(
+                  MaterialPageRoute(
+                    builder: (_) => EditProfileScreen(
+                      profile: _profile,
+                    ),
+                  ),
+                );
+
+                if (result != null && mounted) {
+                  setState(() {
+                    _profile = {
+                      ..._profile,
+                      ...result,
+                    };
+                  });
+                  await _refreshProfile();
+                }
+              },
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Edit Profile'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF0F76FF),
+                backgroundColor: Colors.white,
+                side: const BorderSide(
+                  color: Color(0xFF0F76FF),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 22),
+
+          const Text(
+            'Personal information',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Card(
+            margin: EdgeInsets.zero,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(color: Colors.grey.shade200),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(17),
+              child: Column(
+                children: [
+                  _ProfileInfoRow(
+                    icon: Icons.email_outlined,
+                    label: 'Email address',
+                    value: email.isEmpty ? '-' : email,
+                  ),
+                  _ProfileInfoRow(
+                    icon: Icons.phone_outlined,
+                    label: 'Contact number',
+                    value: contact.isEmpty ? '-' : contact,
+                  ),
+                  _ProfileInfoRow(
+                    icon: Icons.cake_outlined,
+                    label: 'Date of birth',
+                    value: (dateOfBirth == null ||
+                            dateOfBirth.trim().isEmpty)
+                        ? '-'
+                        : _formatProfileDate(dateOfBirth),
+                  ),
+                  _ProfileInfoRow(
+                    icon: Icons.person_outline,
+                    label: 'Gender',
+                    value: gender.isEmpty ? '-' : gender,
+                  ),
+                  _ProfileInfoRow(
+                    icon: Icons.numbers_outlined,
+                    label: 'Age',
+                    value: age.isEmpty ? '-' : age,
+                    showDivider: false,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 22),
+
+          const Text(
+            'Clinic information',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Card(
+            margin: EdgeInsets.zero,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(color: Colors.grey.shade200),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(17),
+              child: Column(
+                children: [
+                  _ProfileInfoRow(
+                    icon: Icons.badge_outlined,
+                    label: 'Patient ID',
+                    value: patientId,
+                  ),
+                  _ProfileInfoRow(
+                    icon: Icons.verified_user_outlined,
+                    label: 'Account status',
+                    value: status,
+                    valueColor: status.toLowerCase() == 'active'
+                        ? Colors.green
+                        : Colors.orange,
+                  ),
+                  _ProfileInfoRow(
+                    icon: Icons.history_outlined,
+                    label: 'Last visit',
+                    value: (lastVisit == null ||
+                            lastVisit.trim().isEmpty)
+                        ? 'No visit recorded'
+                        : _formatProfileDate(lastVisit),
+                  ),
+                  _ProfileInfoRow(
+                    icon: Icons.calendar_today_outlined,
+                    label: 'Registered',
+                    value: _formatProfileDate(_profile['created_at']),
+                    showDivider: false,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Center(
+            child: Text(
+              'Pull down to refresh your profile information.',
+              style: TextStyle(
+                color: Colors.black45,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -3874,6 +4214,82 @@ class _InfoRow
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ProfileInfoRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color? valueColor;
+  final bool showDivider;
+
+  const _ProfileInfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.valueColor,
+    this.showDivider = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F76FF).withValues(alpha: 0.09),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  icon,
+                  color: const Color(0xFF0F76FF),
+                  size: 19,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      value,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: valueColor ?? Colors.black87,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (showDivider)
+          Divider(
+            height: 1,
+            color: Colors.grey.shade200,
+          ),
+      ],
     );
   }
 }
