@@ -9,6 +9,8 @@ import 'notification_screen.dart';
 import 'settings_screen.dart';
 import 'edit_profile_screen.dart';
 import 'try_on_webview_screen.dart';
+import 'verification_screen.dart';
+import 'terms_and_conditions.dart';
 
 class Main {
   static const String baseUrl =
@@ -205,6 +207,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
   bool _isLogin = true;
   bool _isLoading = false;
+  bool _acceptedTerms = false;
 
   int _calculateAge(DateTime birthDate) {
     final now = DateTime.now();
@@ -246,7 +249,34 @@ class _AuthScreenState extends State<AuthScreen> {
     });
   }
 
+  Future<void> _openTermsAndConditions() async {
+    final accepted = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => const TermsAndConditionsScreen(),
+      ),
+    );
+
+    if (!mounted) return;
+
+    if (accepted == true) {
+      setState(() {
+        _acceptedTerms = true;
+      });
+    }
+  }
+
   Future<void> _submit() async {
+    if (!_isLogin && !_acceptedTerms) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please read and accept the Terms and Conditions before registering.',
+          ),
+        ),
+      );
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -258,21 +288,19 @@ class _AuthScreenState extends State<AuthScreen> {
           ? '/api/patients/login'
           : '/api/patients/register';
 
-      final uri =
-          Uri.parse('$apiBaseUrl$endpoint');
+      final uri = Uri.parse('$apiBaseUrl$endpoint');
 
       // =====================================================
       // LOGIN
       // =====================================================
 
       if (_isLogin) {
+        final loginEmail =
+            _emailController.text.trim().toLowerCase();
+
         final payload = {
-          'email':
-              _emailController.text
-                  .trim()
-                  .toLowerCase(),
-          'password':
-              _passwordController.text,
+          'email': loginEmail,
+          'password': _passwordController.text,
         };
 
         final response = await http
@@ -288,11 +316,9 @@ class _AuthScreenState extends State<AuthScreen> {
         Map<String, dynamic> data = {};
 
         try {
-          final decoded =
-              jsonDecode(response.body);
+          final decoded = jsonDecode(response.body);
 
-          if (decoded
-              is Map<String, dynamic>) {
+          if (decoded is Map<String, dynamic>) {
             data = decoded;
           }
         } catch (_) {
@@ -308,6 +334,24 @@ class _AuthScreenState extends State<AuthScreen> {
         );
 
         if (!mounted) return;
+
+        // =================================================
+        // EMAIL VERIFICATION REQUIRED
+        // =================================================
+
+        if (response.statusCode == 403 &&
+            data['code']?.toString() ==
+                'EMAIL_VERIFICATION_REQUIRED') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'This email still needs verification. Please complete registration verification first.',
+              ),
+            ),
+          );
+
+          return;
+        }
 
         if (response.statusCode >= 200 &&
             response.statusCode < 300) {
@@ -337,6 +381,9 @@ class _AuthScreenState extends State<AuthScreen> {
           profileData['email'] =
               data['email'] ?? '';
 
+          profileData['email_verified'] =
+              data['email_verified'] ?? true;
+
           profileData['first_name'] = '';
           profileData['last_name'] = '';
 
@@ -360,7 +407,6 @@ class _AuthScreenState extends State<AuthScreen> {
           profileData['created_at'] =
               data['created_at'] ??
               data['registered_at'] ??
-              data['last_visit'] ??
               '';
 
           // =================================================
@@ -435,34 +481,36 @@ class _AuthScreenState extends State<AuthScreen> {
                   )
                 : 0;
 
+        final registrationEmail =
+            _emailController.text
+                .trim()
+                .toLowerCase();
+
         final payload = {
-  'name':
-      '${_firstNameController.text.trim()} '
-              '${_lastNameController.text.trim()}'
-          .trim(),
+          'name':
+              '${_firstNameController.text.trim()} '
+                      '${_lastNameController.text.trim()}'
+                  .trim(),
 
-  'age': calculatedAge,
+          'age': calculatedAge,
 
-  'date_of_birth':
-      _selectedDateOfBirth != null
-          ? '${_selectedDateOfBirth!.year.toString().padLeft(4, '0')}-'
-            '${_selectedDateOfBirth!.month.toString().padLeft(2, '0')}-'
-            '${_selectedDateOfBirth!.day.toString().padLeft(2, '0')}'
-          : null,
+          'date_of_birth':
+              _selectedDateOfBirth != null
+                  ? '${_selectedDateOfBirth!.year.toString().padLeft(4, '0')}-'
+                    '${_selectedDateOfBirth!.month.toString().padLeft(2, '0')}-'
+                    '${_selectedDateOfBirth!.day.toString().padLeft(2, '0')}'
+                  : null,
 
-  'gender': _selectedGender,
+          'gender': _selectedGender,
 
-  'contact':
-      _contactController.text.trim(),
+          'contact':
+              _contactController.text.trim(),
 
-  'email':
-      _emailController.text
-          .trim()
-          .toLowerCase(),
+          'email': registrationEmail,
 
-  'password':
-      _passwordController.text,
-};
+          'password':
+              _passwordController.text,
+        };
 
         debugPrint(
           'REGISTER REQUEST: $uri',
@@ -485,11 +533,9 @@ class _AuthScreenState extends State<AuthScreen> {
         Map<String, dynamic> data = {};
 
         try {
-          final decoded =
-              jsonDecode(response.body);
+          final decoded = jsonDecode(response.body);
 
-          if (decoded
-              is Map<String, dynamic>) {
+          if (decoded is Map<String, dynamic>) {
             data = decoded;
           }
         } catch (_) {
@@ -497,19 +543,70 @@ class _AuthScreenState extends State<AuthScreen> {
         }
 
         debugPrint(
-          'REGISTER STATUS: '
-          '${response.statusCode}',
+          'REGISTER STATUS: ${response.statusCode}',
         );
 
         debugPrint(
-          'REGISTER RESPONSE: '
-          '${response.body}',
+          'REGISTER RESPONSE: ${response.body}',
         );
 
         if (!mounted) return;
 
         if (response.statusCode >= 200 &&
             response.statusCode < 300) {
+          final requiresVerification =
+              data['requires_email_verification'] == true ||
+              data['email_verified'] == false;
+
+          // =================================================
+          // EMAIL VERIFICATION
+          // =================================================
+
+          if (requiresVerification) {
+            final verified =
+                await Navigator.of(context).push<bool>(
+              MaterialPageRoute(
+                builder: (_) => VerificationPage(
+                  email:
+                      data['email']?.toString() ??
+                      registrationEmail,
+                ),
+              ),
+            );
+
+            if (!mounted) return;
+
+            // After successful verification,
+            // return to Login with the registered email.
+            if (verified == true) {
+              _passwordController.clear();
+
+              setState(() {
+                _isLogin = true;
+                _acceptedTerms = false;
+                _emailController.text =
+                    data['email']?.toString() ??
+                    registrationEmail;
+              });
+
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Email verified successfully. Your account has been created. Please sign in.',
+                  ),
+                ),
+              );
+            }
+
+            return;
+          }
+
+          // =================================================
+          // FALLBACK FOR ACCOUNTS THAT DO NOT REQUIRE
+          // EMAIL VERIFICATION
+          // =================================================
+
           ScaffoldMessenger.of(context)
               .showSnackBar(
             SnackBar(
@@ -519,10 +616,6 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
             ),
           );
-
-          // =================================================
-          // CLEAR REGISTRATION FIELDS
-          // =================================================
 
           _firstNameController.clear();
           _lastNameController.clear();
@@ -534,7 +627,7 @@ class _AuthScreenState extends State<AuthScreen> {
           setState(() {
             _selectedDateOfBirth = null;
             _selectedGender = 'Male';
-
+            _acceptedTerms = false;
             _isLogin = true;
           });
         } else {
@@ -902,6 +995,55 @@ class _AuthScreenState extends State<AuthScreen> {
                                       : null,
                         ),
                       ],
+                      if (!_isLogin) ...[
+                        const SizedBox(height: 16),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: _openTermsAndConditions,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Checkbox(
+                                value: _acceptedTerms,
+                                activeColor: const Color(0xFF0F76FF),
+                                onChanged: (value) {
+                                  if (value == true) {
+                                    _openTermsAndConditions();
+                                  } else {
+                                    setState(() {
+                                      _acceptedTerms = false;
+                                    });
+                                  }
+                                },
+                              ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 12),
+                                  child: Wrap(
+                                    children: [
+                                      const Text(
+                                        'I agree to the ',
+                                        style: TextStyle(fontSize: 14),
+                                      ),
+                                      GestureDetector(
+                                        onTap: _openTermsAndConditions,
+                                        child: const Text(
+                                          'Terms and Conditions',
+                                          style: TextStyle(
+                                            color: Color(0xFF0F76FF),
+                                            fontWeight: FontWeight.w600,
+                                            decoration: TextDecoration.underline,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(
                           height: 24),
                       ElevatedButton(
@@ -951,11 +1093,14 @@ class _AuthScreenState extends State<AuthScreen> {
                       const SizedBox(
                           height: 16),
                       TextButton(
-                        onPressed: () =>
-                            setState(
-                          () => _isLogin =
-                              !_isLogin,
-                        ),
+                        onPressed: () {
+                          setState(() {
+                            _isLogin = !_isLogin;
+                            if (_isLogin) {
+                              _acceptedTerms = false;
+                            }
+                          });
+                        },
                         child: Text(
                           _isLogin
                               ? 'Create an account? Register'
