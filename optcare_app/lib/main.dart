@@ -14,7 +14,7 @@ import 'terms_and_conditions.dart';
 
 class Main {
   static const String baseUrl =
-      'https://gonzalesvisionclinic.onrender.com/api';
+      'https://api.gonzalesvisionclinic.com';
 }
 
 const Map<String, String> jsonHeaders = {
