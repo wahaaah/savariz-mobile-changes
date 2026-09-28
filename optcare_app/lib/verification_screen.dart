@@ -315,7 +315,7 @@ class _VerificationPageState extends State<VerificationPage> {
             ? TextInputAction.done
             : TextInputAction.next,
         maxLength: 1,
-        inputFormatters: const [
+        inputFormatters: [
           FilteringTextInputFormatter.digitsOnly,
         ],
         style: const TextStyle(
