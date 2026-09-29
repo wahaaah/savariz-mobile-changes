@@ -32,7 +32,7 @@ import 'edit_profile_screen.dart';
 import 'try_on_webview_screen.dart';
 import 'verification_screen.dart';
 import 'terms_and_conditions.dart';
-
+  
 class Main {
   static const String baseUrl =
       'https://api.gonzalesvisionclinic.com';
