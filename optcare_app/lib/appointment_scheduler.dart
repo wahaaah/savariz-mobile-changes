@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'appointment_scheduler.dart';
 import 'app_notifications.dart';
 import 'app_settings.dart';
 import 'constants.dart';
@@ -41,14 +40,6 @@ const Color primaryBlue = Color(0xFF0F76FF);
 const Color surfaceWhite = Color(0xFFFFFFFF);
 const Color backgroundGray = Color(0xFFF4F7FB);
 
-const Map<String, String> jsonHeaders = {
-  'Content-Type': 'application/json',
-  'Accept': 'application/json',
-};
-
-const Color primaryBlue = Color(0xFF0F76FF);
-const Color surfaceWhite = Color(0xFFFFFFFF);
-const Color backgroundGray = Color(0xFFF4F7FB);
 
 String normalizeAppointmentStatus(dynamic rawStatus) {
   final value = rawStatus?.toString().trim();
