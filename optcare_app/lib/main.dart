@@ -198,6 +198,9 @@ class _AuthScreenState extends State<AuthScreen> {
   final _contactController =
       TextEditingController();
 
+  final _addressController =
+      TextEditingController();
+
   final _ageController =
       TextEditingController();
 
@@ -393,6 +396,9 @@ class _AuthScreenState extends State<AuthScreen> {
               data['phone'] ??
               '';
 
+          profileData['address'] =
+              data['address'] ?? '';
+
           profileData['gender'] =
               data['gender'] ?? 'Male';
 
@@ -505,6 +511,9 @@ class _AuthScreenState extends State<AuthScreen> {
 
           'contact':
               _contactController.text.trim(),
+
+          'address':
+              _addressController.text.trim(),
 
           'email': registrationEmail,
 
@@ -622,6 +631,7 @@ class _AuthScreenState extends State<AuthScreen> {
           _emailController.clear();
           _passwordController.clear();
           _contactController.clear();
+          _addressController.clear();
           _ageController.clear();
 
           setState(() {
@@ -676,6 +686,7 @@ class _AuthScreenState extends State<AuthScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _contactController.dispose();
+    _addressController.dispose();
     _ageController.dispose();
 
     super.dispose();
@@ -993,6 +1004,24 @@ class _AuthScreenState extends State<AuthScreen> {
                                               .isEmpty
                                       ? 'Enter contact number'
                                       : null,
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _addressController,
+                          decoration: const InputDecoration(
+                            labelText: 'Address',
+                            hintText: 'Enter your complete address',
+                            alignLabelWithHint: true,
+                          ),
+                          keyboardType: TextInputType.streetAddress,
+                          textInputAction: TextInputAction.newline,
+                          maxLines: 2,
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'Enter address';
+                            }
+                            return null;
+                          },
                         ),
                       ],
                       if (!_isLogin) ...[
@@ -3528,6 +3557,8 @@ class _DashboardScreenState
         (_profile['contact_number'] ?? _profile['contact'] ?? '')
             .toString()
             .trim();
+    final address =
+        (_profile['address'] ?? '').toString().trim();
     final patientId =
         _profile['patient_id']?.toString().trim() ?? '-';
     final gender = _profile['gender']?.toString().trim() ?? '';
@@ -3770,6 +3801,11 @@ class _DashboardScreenState
                     icon: Icons.phone_outlined,
                     label: 'Contact number',
                     value: contact.isEmpty ? '-' : contact,
+                  ),
+                  _ProfileInfoRow(
+                    icon: Icons.home_outlined,
+                    label: 'Address',
+                    value: address.isEmpty ? '-' : address,
                   ),
                   _ProfileInfoRow(
                     icon: Icons.cake_outlined,
