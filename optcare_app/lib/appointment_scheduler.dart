@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -13,26 +12,6 @@ import 'try_on_webview_screen.dart';
 import 'verification_screen.dart';
 import 'terms_and_conditions.dart';
 
-class Main {
-  static const String baseUrl =
-      'https://api.gonzalesvisionclinic.com';
-}
-
-
-import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'appointment_scheduler.dart';
-import 'app_notifications.dart';
-import 'app_settings.dart';
-import 'constants.dart';
-import 'notification_screen.dart';
-import 'settings_screen.dart';
-import 'edit_profile_screen.dart';
-import 'try_on_webview_screen.dart';
-import 'verification_screen.dart';
-import 'terms_and_conditions.dart';
-  
 class Main {
   static const String baseUrl =
       'https://api.gonzalesvisionclinic.com';
