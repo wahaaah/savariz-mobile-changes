@@ -27,8 +27,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _currentPasswordController = TextEditingController();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _otpController = TextEditingController();
 
   bool _isLoading = true;
+  bool _otpLoading = false;
 
   @override
   void initState() {
@@ -81,11 +83,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  // =========================================================
+  // REQUEST PASSWORD CHANGE OTP
+  // =========================================================
+
   Future<void> _savePassword() async {
     final currentPassword =
         _currentPasswordController.text.trim();
+
     final newPassword =
         _newPasswordController.text;
+
     final confirmPassword =
         _confirmPasswordController.text;
 
@@ -94,7 +102,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         confirmPassword.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please fill all password fields.'),
+          content: Text(
+            'Please fill all password fields.',
+          ),
         ),
       );
       return;
@@ -133,13 +143,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
+    if (widget.patientId.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Patient ID is missing. Please log in again.',
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() {
-      _isLoading = true;
+      _otpLoading = true;
     });
 
     try {
       final uri = Uri.parse(
-        '$apiBaseUrl/change_password.php',
+        '$apiBaseUrl/api/patients/request-password-change',
       );
 
       final response = await http
@@ -150,9 +171,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'Accept': 'application/json',
             },
             body: jsonEncode({
-              'patient_id': widget.patientId,
+              'patient_id': widget.patientId.trim(),
               'current_password': currentPassword,
-              'new_password': newPassword,
             }),
           )
           .timeout(
@@ -176,9 +196,238 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (response.statusCode >= 200 &&
           response.statusCode < 300 &&
           data['success'] == true) {
+        setState(() {
+          _otpLoading = false;
+        });
+
+        _showPasswordOtpDialog(
+          widget.patientId.trim(),
+          newPassword,
+        );
+      } else {
+        setState(() {
+          _otpLoading = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              data['error']?.toString() ??
+                  data['message']?.toString() ??
+                  'Unable to send verification code.',
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _otpLoading = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Unable to connect to the server. Please try again.',
+          ),
+        ),
+      );
+    }
+  }
+
+  // =========================================================
+  // OTP VERIFICATION DIALOG
+  // =========================================================
+
+  Future<void> _showPasswordOtpDialog(
+    String patientId,
+    String newPassword,
+  ) async {
+    _otpController.clear();
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        bool verifying = false;
+
+        return StatefulBuilder(
+          builder: (
+            context,
+            setDialogState,
+          ) {
+            return AlertDialog(
+              title: const Text(
+                'Verify Password Change',
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'A 6-digit verification code has been sent to your registered email address.',
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _otpController,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.done,
+                    maxLength: 6,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 4,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Verification Code',
+                      hintText: '000000',
+                      border: OutlineInputBorder(),
+                      counterText: '',
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: verifying
+                      ? null
+                      : () {
+                          Navigator.of(dialogContext).pop();
+                        },
+                  child: const Text(
+                    'Cancel',
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: verifying
+                      ? null
+                      : () async {
+                          final otp =
+                              _otpController.text.trim();
+
+                          if (!RegExp(r'^\d{6}$')
+                              .hasMatch(otp)) {
+                            ScaffoldMessenger.of(
+                              context,
+                            ).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Enter the 6-digit verification code.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+
+                          setDialogState(() {
+                            verifying = true;
+                          });
+
+                          final success =
+                              await _confirmPasswordChange(
+                            patientId,
+                            newPassword,
+                            otp,
+                          );
+
+                          if (!mounted) return;
+
+                          if (success) {
+                            Navigator.of(
+                              dialogContext,
+                            ).pop();
+                          } else {
+                            setDialogState(() {
+                              verifying = false;
+                            });
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:
+                        const Color(0xFF0F76FF),
+                    foregroundColor: Colors.white,
+                  ),
+                  child: verifying
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child:
+                              CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text(
+                          'Verify',
+                        ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (mounted) {
+      _otpController.clear();
+    }
+  }
+
+  // =========================================================
+  // CONFIRM PASSWORD CHANGE
+  // =========================================================
+
+  Future<bool> _confirmPasswordChange(
+    String patientId,
+    String newPassword,
+    String otp,
+  ) async {
+    try {
+      final uri = Uri.parse(
+        '$apiBaseUrl/api/patients/confirm-password-change',
+      );
+
+      final response = await http
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode({
+              'patient_id': patientId,
+              'otp': otp,
+              'new_password': newPassword,
+            }),
+          )
+          .timeout(
+            const Duration(seconds: 15),
+          );
+
+      Map<String, dynamic> data = {};
+
+      try {
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is Map<String, dynamic>) {
+          data = decoded;
+        }
+      } catch (_) {
+        data = {};
+      }
+
+      if (!mounted) return false;
+
+      if (response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          data['success'] == true) {
         _currentPasswordController.clear();
         _newPasswordController.clear();
         _confirmPasswordController.clear();
+        _otpController.clear();
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -189,19 +438,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             backgroundColor: Colors.green,
           ),
         );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              data['error']?.toString() ??
-                  data['message']?.toString() ??
-                  'Unable to change password.',
-            ),
-          ),
-        );
+
+        return true;
       }
-    } catch (e) {
-      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            data['error']?.toString() ??
+                data['message']?.toString() ??
+                'Invalid verification code.',
+          ),
+        ),
+      );
+
+      return false;
+    } catch (_) {
+      if (!mounted) return false;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -210,12 +463,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+
+      return false;
     }
   }
 
@@ -232,6 +481,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _currentPasswordController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
+    _otpController.dispose();
+
     super.dispose();
   }
 
@@ -288,7 +539,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       'Receive alerts for appointment reminders and updates.',
                     ),
                     value: _notificationsOn,
-                    activeThumbColor: const Color(0xFF0F76FF),
+                    activeThumbColor:
+                        const Color(0xFF0F76FF),
                     onChanged: _updateNotification,
                   ),
 
@@ -302,7 +554,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       'Receive promo, new lenses, glasses, and update emails.',
                     ),
                     value: _emailUpdatesOn,
-                    activeThumbColor: const Color(0xFF0F76FF),
+                    activeThumbColor:
+                        const Color(0xFF0F76FF),
                     onChanged: _updateEmailUpdates,
                   ),
                 ],
@@ -333,12 +586,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
 
+                    const SizedBox(height: 6),
+
+                    const Text(
+                      'A verification code will be sent to your registered email before your password is changed.',
+                      style: TextStyle(
+                        color: Colors.black54,
+                      ),
+                    ),
+
                     const SizedBox(height: 14),
 
                     TextField(
                       controller:
                           _currentPasswordController,
                       obscureText: true,
+                      enabled: !_otpLoading,
                       decoration: const InputDecoration(
                         labelText: 'Current password',
                         border: OutlineInputBorder(),
@@ -351,6 +614,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       controller:
                           _newPasswordController,
                       obscureText: true,
+                      enabled: !_otpLoading,
                       decoration: const InputDecoration(
                         labelText: 'New password',
                         border: OutlineInputBorder(),
@@ -363,6 +627,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       controller:
                           _confirmPasswordController,
                       obscureText: true,
+                      enabled: !_otpLoading,
                       decoration: const InputDecoration(
                         labelText: 'Confirm new password',
                         border: OutlineInputBorder(),
@@ -375,19 +640,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       width: double.infinity,
                       height: 48,
                       child: ElevatedButton(
-                        onPressed: _savePassword,
-                        style: ElevatedButton.styleFrom(
+                        onPressed:
+                            _otpLoading
+                                ? null
+                                : _savePassword,
+                        style:
+                            ElevatedButton.styleFrom(
                           backgroundColor:
                               const Color(0xFF0F76FF),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
+                          foregroundColor:
+                              Colors.white,
+                          disabledBackgroundColor:
+                              Colors.grey.shade400,
+                          shape:
+                              RoundedRectangleBorder(
                             borderRadius:
                                 BorderRadius.circular(16),
                           ),
                         ),
-                        child: const Text(
-                          'Save Password',
-                        ),
+                        child: _otpLoading
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child:
+                                    CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color:
+                                      Colors.white,
+                                ),
+                              )
+                            : const Text(
+                                'Continue',
+                              ),
                       ),
                     ),
                   ],
