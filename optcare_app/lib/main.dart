@@ -108,64 +108,64 @@ class _MyAppState extends State<MyApp> {
         final currentSettings = settings as dynamic;
 
         return MaterialApp(
-          title: 'Gonzales Vision Clinic',
-          debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-            brightness: Brightness.light,
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: primaryBlue,
-              brightness: Brightness.light,
-            ),
-            useMaterial3: true,
-            scaffoldBackgroundColor: backgroundGray,
-            appBarTheme: const AppBarTheme(
-              backgroundColor: primaryBlue,
-              foregroundColor: Colors.white,
-              elevation: 0,
-            ),
-            cardTheme: CardThemeData(
-              color: surfaceWhite,
-              elevation: 4,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-            ),
-            elevatedButtonTheme:
-                ElevatedButtonThemeData(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primaryBlue,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-            inputDecorationTheme:
-                InputDecorationTheme(
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(
-                  color: Colors.grey.shade300,
-                ),
-              ),
-            ),
-          ),
-          builder: (context, child) {
-            return MediaQuery(
-              data: MediaQuery.of(context).copyWith(
-                textScaler: TextScaler.linear(
-                  currentSettings.largeTextOn
-                      ? 1.3
-                      : 1.0,
-                ),
-              ),
-              child:
-                  child ?? const SizedBox.shrink(),
-            );
-          },
-          home: const AuthScreen(),
-        );
+  title: 'Gonzales Vision Clinic',
+  debugShowCheckedModeBanner: false,
+
+  theme: ThemeData(
+    brightness: Brightness.light,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: primaryBlue,
+      brightness: Brightness.light,
+    ),
+    useMaterial3: true,
+    scaffoldBackgroundColor: backgroundGray,
+
+    appBarTheme: const AppBarTheme(
+      backgroundColor: primaryBlue,
+      foregroundColor: Colors.white,
+      elevation: 0,
+    ),
+
+    cardTheme: CardThemeData(
+      color: surfaceWhite,
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+    ),
+
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: primaryBlue,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+    ),
+
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: Colors.white,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(
+          color: Colors.grey.shade300,
+        ),
+      ),
+    ),
+  ),
+
+  builder: (context, child) {
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        textScaler: const TextScaler.linear(1.0),
+      ),
+      child: child ?? const SizedBox.shrink(),
+    );
+  },
+
+  home: const AuthScreen(),
+);
       },
     );
   }
