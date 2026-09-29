@@ -18,6 +18,50 @@ class Main {
       'https://api.gonzalesvisionclinic.com';
 }
 
+
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'appointment_scheduler.dart';
+import 'app_notifications.dart';
+import 'app_settings.dart';
+import 'constants.dart';
+import 'notification_screen.dart';
+import 'settings_screen.dart';
+import 'edit_profile_screen.dart';
+import 'try_on_webview_screen.dart';
+import 'verification_screen.dart';
+import 'terms_and_conditions.dart';
+
+class Main {
+  static const String baseUrl =
+      'https://api.gonzalesvisionclinic.com';
+}
+
+class AppointmentSchedulerScreen extends StatefulWidget {
+  final dynamic patientId;
+  final Future<void> Function() onScheduled;
+
+  const AppointmentSchedulerScreen({
+    super.key,
+    required this.patientId,
+    required this.onScheduled,
+  });
+
+  @override
+  State<AppointmentSchedulerScreen> createState() =>
+      _AppointmentSchedulerScreenState();
+}
+
+const Map<String, String> jsonHeaders = {
+  'Content-Type': 'application/json',
+  'Accept': 'application/json',
+};
+
+const Color primaryBlue = Color(0xFF0F76FF);
+const Color surfaceWhite = Color(0xFFFFFFFF);
+const Color backgroundGray = Color(0xFFF4F7FB);
+
 const Map<String, String> jsonHeaders = {
   'Content-Type': 'application/json',
   'Accept': 'application/json',
