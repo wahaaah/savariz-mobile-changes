@@ -1,20 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'app_notifications.dart';
-import 'app_settings.dart';
-import 'constants.dart';
-import 'notification_screen.dart';
-import 'settings_screen.dart';
-import 'edit_profile_screen.dart';
-import 'try_on_webview_screen.dart';
-import 'verification_screen.dart';
-import 'terms_and_conditions.dart';
 
-class Main {
-  static const String baseUrl =
-      'https://api.gonzalesvisionclinic.com';
-}
+import 'constants.dart';
 
 class AppointmentSchedulerScreen extends StatefulWidget {
   final dynamic patientId;
@@ -31,2254 +21,777 @@ class AppointmentSchedulerScreen extends StatefulWidget {
       _AppointmentSchedulerScreenState();
 }
 
-const Map<String, String> jsonHeaders = {
-  'Content-Type': 'application/json',
-  'Accept': 'application/json',
-};
+class _AppointmentSchedulerScreenState
+    extends State<AppointmentSchedulerScreen> {
+  DateTime _selectedDate = DateTime.now();
 
-const Color primaryBlue = Color(0xFF0F76FF);
-const Color surfaceWhite = Color(0xFFFFFFFF);
-const Color backgroundGray = Color(0xFFF4F7FB);
+  TimeOfDay? _selectedTime;
 
+  final _appointmentTypeController = TextEditingController();
 
-String normalizeAppointmentStatus(dynamic rawStatus) {
-  final value = rawStatus?.toString().trim();
+  bool _creatingAppointment = false;
+  bool _loadingAvailability = false;
+  bool _refreshingAvailability = false;
 
-  if (value == null || value.isEmpty) {
-    return 'Pending';
+  String? _availabilityError;
+
+  Timer? _availabilityRefreshTimer;
+
+  /*
+  ============================================================
+  CLINIC OPERATING TIME SLOTS
+  8:00 AM - 5:30 PM
+  Every 30 minutes
+  ============================================================
+  */
+
+  final List<TimeOfDay> _operatingTimeSlots = [
+    const TimeOfDay(hour: 8, minute: 0),
+    const TimeOfDay(hour: 8, minute: 30),
+    const TimeOfDay(hour: 9, minute: 0),
+    const TimeOfDay(hour: 9, minute: 30),
+    const TimeOfDay(hour: 10, minute: 0),
+    const TimeOfDay(hour: 10, minute: 30),
+    const TimeOfDay(hour: 11, minute: 0),
+    const TimeOfDay(hour: 11, minute: 30),
+    const TimeOfDay(hour: 12, minute: 0),
+    const TimeOfDay(hour: 12, minute: 30),
+    const TimeOfDay(hour: 13, minute: 0),
+    const TimeOfDay(hour: 13, minute: 30),
+    const TimeOfDay(hour: 14, minute: 0),
+    const TimeOfDay(hour: 14, minute: 30),
+    const TimeOfDay(hour: 15, minute: 0),
+    const TimeOfDay(hour: 15, minute: 30),
+    const TimeOfDay(hour: 16, minute: 0),
+    const TimeOfDay(hour: 16, minute: 30),
+    const TimeOfDay(hour: 17, minute: 0),
+    const TimeOfDay(hour: 17, minute: 30),
+  ];
+
+  /*
+  ============================================================
+  BOOKED SLOTS
+  Example:
+  2026-10-01 12:30
+  ============================================================
+  */
+
+  final Set<String> _bookedSlots = {};
+
+  /*
+  ============================================================
+  DATE HELPERS
+  ============================================================
+  */
+
+  String _formatDate(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
   }
 
-  final normalized = value.toLowerCase();
-
-  if (normalized == 'requested' ||
-      normalized == 'pending' ||
-      normalized == 'new' ||
-      normalized == 'submitted') {
-    return 'Pending';
+  String _timeKey(TimeOfDay time) {
+    return '${time.hour.toString().padLeft(2, '0')}:'
+        '${time.minute.toString().padLeft(2, '0')}';
   }
 
-  if (normalized == 'confirmed' ||
-      normalized == 'approved' ||
-      normalized == 'accepted') {
-    return 'Confirmed';
+  String _toMysqlTime(TimeOfDay time) {
+    return '${_timeKey(time)}:00';
   }
 
-  if (normalized == 'cancelled' ||
-      normalized == 'canceled' ||
-      normalized == 'rejected' ||
-      normalized == 'declined') {
-    return 'Cancelled';
-  }
-
-  return value[0].toUpperCase() +
-      value.substring(1).toLowerCase();
-}
-
-String resolveFrameImageUrl(String? rawUrl) {
-  if (rawUrl == null || rawUrl.trim().isEmpty) {
-    return '';
-  }
-
-  final cleaned = rawUrl.trim();
-
-  if (cleaned.startsWith('http://') ||
-      cleaned.startsWith('https://')) {
-    return cleaned;
-  }
-
-  if (cleaned.startsWith('/')) {
-    return '$apiBaseUrl$cleaned';
-  }
-
-  return '$apiBaseUrl/${cleaned.replaceFirst(RegExp(r'^/+'), '')}';
-}
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatefulWidget {
-  const MyApp({super.key});
-
-  @override
-  State<MyApp> createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
-  @override
-  void initState() {
-    super.initState();
-    appSettingsController.load();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder(
-      valueListenable: appSettingsController,
-      builder: (
-        BuildContext context,
-        settings,
-        Widget? child,
-      ) {
-        final currentSettings = settings as dynamic;
-
-        return MaterialApp(
-          title: 'Gonzales Vision Clinic',
-          debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-            brightness: Brightness.light,
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: primaryBlue,
-              brightness: Brightness.light,
-            ),
-            useMaterial3: true,
-            scaffoldBackgroundColor: backgroundGray,
-            appBarTheme: const AppBarTheme(
-              backgroundColor: primaryBlue,
-              foregroundColor: Colors.white,
-              elevation: 0,
-            ),
-            cardTheme: CardThemeData(
-              color: surfaceWhite,
-              elevation: 4,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-            ),
-            elevatedButtonTheme:
-                ElevatedButtonThemeData(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primaryBlue,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-            inputDecorationTheme:
-                InputDecorationTheme(
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(
-                  color: Colors.grey.shade300,
-                ),
-              ),
-            ),
-          ),
-          builder: (context, child) {
-            return MediaQuery(
-              data: MediaQuery.of(context).copyWith(
-                textScaler: const TextScaler.linear(1.0),
-              ),
-              child:
-                  child ?? const SizedBox.shrink(),
-            );
-          },
-          home: const AuthScreen(),
-        );
-      },
-    );
-  }
-}
-
-class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
-
-  @override
-  State<AuthScreen> createState() =>
-      _AuthScreenState();
-}
-
-class _AuthScreenState extends State<AuthScreen> {
-  final _formKey =
-      GlobalKey<FormState>();
-
-  final _firstNameController =
-      TextEditingController();
-
-  final _lastNameController =
-      TextEditingController();
-
-  final _emailController =
-      TextEditingController();
-
-  final _passwordController =
-      TextEditingController();
-
-  final _contactController =
-      TextEditingController();
-
-  final _addressController =
-      TextEditingController();
-
-  final _ageController =
-      TextEditingController();
-
-  DateTime? _selectedDateOfBirth;
-
-  String _selectedGender = 'Male';
-
-  bool _isLogin = true;
-  bool _isLoading = false;
-  bool _acceptedTerms = false;
-
-  int _calculateAge(DateTime birthDate) {
+  bool _isToday(DateTime date) {
     final now = DateTime.now();
 
-    int age =
-        now.year - birthDate.year;
-
-    if (now.month < birthDate.month ||
-        (now.month == birthDate.month &&
-            now.day < birthDate.day)) {
-      age--;
-    }
-
-    return age;
+    return date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day;
   }
 
-  Future<void> _pickDateOfBirth() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate:
-          DateTime.now().subtract(
-        const Duration(days: 3650),
-      ),
-      firstDate: DateTime(1900),
-      lastDate: DateTime.now(),
+  /*
+  ============================================================
+  20-MINUTE BOOKING CUTOFF
+
+  A slot becomes unavailable when there are
+  20 minutes or less remaining before the appointment.
+
+  Example:
+
+  4:09 PM -> 4:30 PM = AVAILABLE
+  4:10 PM -> 4:30 PM = BOOKING CLOSED
+  4:11 PM -> 4:30 PM = BOOKING CLOSED
+
+  Future dates are not affected by this cutoff.
+  ============================================================
+  */
+
+  bool _isPastTime(TimeOfDay time) {
+    if (!_isToday(_selectedDate)) {
+      return false;
+    }
+
+    final now = DateTime.now();
+
+    final appointmentDateTime = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+      time.hour,
+      time.minute,
     );
 
-    if (picked == null) {
+    final difference = appointmentDateTime.difference(now);
+
+    return difference <= const Duration(minutes: 20);
+  }
+
+  /*
+  ============================================================
+  CHECK IF SLOT IS ALREADY BOOKED
+  ============================================================
+  */
+
+  bool _isSlotBooked(TimeOfDay time) {
+    final date = _formatDate(_selectedDate);
+    final key = '$date ${_timeKey(time)}';
+
+    return _bookedSlots.contains(key);
+  }
+
+  /*
+  ============================================================
+  LOAD BOOKED APPOINTMENT SLOTS
+
+  showLoading = true
+  Used when the user changes the date or first opens the page.
+
+  showLoading = false
+  Used by the 10-second background refresh so the UI
+  does not constantly show a loading spinner.
+  ============================================================
+  */
+
+  Future<void> _loadBookedSlots({
+    bool showLoading = true,
+  }) async {
+    if (!mounted) return;
+
+    if (_refreshingAvailability) {
       return;
     }
 
-    setState(() {
-      _selectedDateOfBirth = picked;
+    _refreshingAvailability = true;
 
-      _ageController.text =
-          '${picked.day.toString().padLeft(2, '0')}/'
-          '${picked.month.toString().padLeft(2, '0')}/'
-          '${picked.year}';
-    });
-  }
+    final currentSelectedTime = _selectedTime;
 
-  Future<void> _openTermsAndConditions() async {
-    final accepted = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => const TermsAndConditionsScreen(),
-      ),
-    );
-
-    if (!mounted) return;
-
-    if (accepted == true) {
+    if (showLoading) {
       setState(() {
-        _acceptedTerms = true;
+        _loadingAvailability = true;
+        _availabilityError = null;
+        _bookedSlots.clear();
       });
     }
-  }
-
-  Future<void> _submit() async {
-    if (!_isLogin && !_acceptedTerms) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Please read and accept the Terms and Conditions before registering.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    setState(() => _isLoading = true);
 
     try {
-      final endpoint = _isLogin
-          ? '/api/patients/login'
-          : '/api/patients/register';
-
-      final uri = Uri.parse('$apiBaseUrl$endpoint');
-
-      // =====================================================
-      // LOGIN
-      // =====================================================
-
-      if (_isLogin) {
-        final loginEmail =
-            _emailController.text.trim().toLowerCase();
-
-        final payload = {
-          'email': loginEmail,
-          'password': _passwordController.text,
-        };
-
-        final response = await http
-            .post(
-              uri,
-              headers: jsonHeaders,
-              body: jsonEncode(payload),
-            )
-            .timeout(
-              const Duration(seconds: 15),
-            );
-
-        Map<String, dynamic> data = {};
-
-        try {
-          final decoded = jsonDecode(response.body);
-
-          if (decoded is Map<String, dynamic>) {
-            data = decoded;
-          }
-        } catch (_) {
-          data = {};
-        }
-
-        debugPrint(
-          'LOGIN STATUS: ${response.statusCode}',
-        );
-
-        debugPrint(
-          'LOGIN RESPONSE: ${response.body}',
-        );
-
-        if (!mounted) return;
-
-        // =================================================
-        // EMAIL VERIFICATION REQUIRED
-        // =================================================
-
-        if (response.statusCode == 403 &&
-            data['code']?.toString() ==
-                'EMAIL_VERIFICATION_REQUIRED') {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'This email still needs verification. Please complete registration verification first.',
-              ),
-            ),
-          );
-
-          return;
-        }
-
-        if (response.statusCode >= 200 &&
-            response.statusCode < 300) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(
-            SnackBar(
-              content: Text(
-                data['message']?.toString() ??
-                    'Login successful',
-              ),
-            ),
-          );
-
-          // =================================================
-          // BACKEND RETURNS THE PATIENT DIRECTLY
-          // =================================================
-
-          final profileData =
-              <String, dynamic>{};
-
-          profileData['patient_id'] =
-              data['patient_id'] ??
-              data['user_id'] ??
-              data['id'] ??
-              '';
-
-          profileData['email'] =
-              data['email'] ?? '';
-
-          profileData['email_verified'] =
-              data['email_verified'] ?? true;
-
-          profileData['first_name'] = '';
-          profileData['last_name'] = '';
-
-          profileData['contact_number'] =
-              data['contact_number'] ??
-              data['contact'] ??
-              data['phone'] ??
-              '';
-
-          profileData['address'] =
-              data['address'] ?? '';
-
-          profileData['gender'] =
-              data['gender'] ?? 'Male';
-
-          profileData['date_of_birth'] =
-              data['date_of_birth'] ??
-              data['dob'] ??
-              data['birth_date'];
-
-          profileData['age'] =
-              data['age'];
-
-          profileData['created_at'] =
-              data['created_at'] ??
-              data['registered_at'] ??
-              '';
-
-          // =================================================
-          // SPLIT BACKEND "name"
-          // INTO FIRST/LAST NAME
-          // =================================================
-
-          if (data['name'] != null) {
-            final fullName =
-                data['name']
-                    .toString()
-                    .trim();
-
-            if (fullName.isNotEmpty) {
-              final parts =
-                  fullName.split(' ');
-
-              profileData['first_name'] =
-                  parts.first;
-
-              profileData['last_name'] =
-                  parts.length > 1
-                      ? parts
-                          .sublist(1)
-                          .join(' ')
-                      : '';
-            }
-          }
-
-          debugPrint(
-            'LOGIN PROFILE DATA: $profileData',
-          );
-
-          // =================================================
-          // OPEN DASHBOARD
-          // =================================================
-
-          Navigator.of(context)
-              .pushReplacement(
-            MaterialPageRoute(
-              builder: (_) =>
-                  DashboardScreen(
-                profileData: profileData,
-              ),
-            ),
-          );
-        } else {
-          final msg =
-              (data['message'] ??
-                      data['error'])
-                  ?.toString() ??
-              'Login failed';
-
-          ScaffoldMessenger.of(context)
-              .showSnackBar(
-            SnackBar(
-              content: Text(msg),
-            ),
-          );
-        }
-      }
-
-      // =====================================================
-      // REGISTRATION
-      // =====================================================
-
-      else {
-        final calculatedAge =
-            _selectedDateOfBirth != null
-                ? _calculateAge(
-                    _selectedDateOfBirth!,
-                  )
-                : 0;
-
-        final registrationEmail =
-            _emailController.text
-                .trim()
-                .toLowerCase();
-
-        final payload = {
-          'name':
-              '${_firstNameController.text.trim()} '
-                      '${_lastNameController.text.trim()}'
-                  .trim(),
-
-          'age': calculatedAge,
-
-          'date_of_birth':
-              _selectedDateOfBirth != null
-                  ? '${_selectedDateOfBirth!.year.toString().padLeft(4, '0')}-'
-                    '${_selectedDateOfBirth!.month.toString().padLeft(2, '0')}-'
-                    '${_selectedDateOfBirth!.day.toString().padLeft(2, '0')}'
-                  : null,
-
-          'gender': _selectedGender,
-
-          'contact':
-              _contactController.text.trim(),
-
-          'address':
-              _addressController.text.trim(),
-
-          'email': registrationEmail,
-
-          'password':
-              _passwordController.text,
-        };
-
-        debugPrint(
-          'REGISTER REQUEST: $uri',
-        );
-
-        debugPrint(
-          'REGISTER PAYLOAD: $payload',
-        );
-
-        final response = await http
-            .post(
-              uri,
-              headers: jsonHeaders,
-              body: jsonEncode(payload),
-            )
-            .timeout(
-              const Duration(seconds: 15),
-            );
-
-        Map<String, dynamic> data = {};
-
-        try {
-          final decoded = jsonDecode(response.body);
-
-          if (decoded is Map<String, dynamic>) {
-            data = decoded;
-          }
-        } catch (_) {
-          data = {};
-        }
-
-        debugPrint(
-          'REGISTER STATUS: ${response.statusCode}',
-        );
-
-        debugPrint(
-          'REGISTER RESPONSE: ${response.body}',
-        );
-
-        if (!mounted) return;
-
-        if (response.statusCode >= 200 &&
-            response.statusCode < 300) {
-          final requiresVerification =
-              data['requires_email_verification'] == true ||
-              data['email_verified'] == false;
-
-          // =================================================
-          // EMAIL VERIFICATION
-          // =================================================
-
-          if (requiresVerification) {
-            final verified =
-                await Navigator.of(context).push<bool>(
-              MaterialPageRoute(
-                builder: (_) => VerificationPage(
-                  email:
-                      data['email']?.toString() ??
-                      registrationEmail,
-                ),
-              ),
-            );
-
-            if (!mounted) return;
-
-            // After successful verification,
-            // return to Login with the registered email.
-            if (verified == true) {
-              _passwordController.clear();
-
-              setState(() {
-                _isLogin = true;
-                _acceptedTerms = false;
-                _emailController.text =
-                    data['email']?.toString() ??
-                    registrationEmail;
-              });
-
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Email verified successfully. Your account has been created. Please sign in.',
-                  ),
-                ),
-              );
-            }
-
-            return;
-          }
-
-          // =================================================
-          // FALLBACK FOR ACCOUNTS THAT DO NOT REQUIRE
-          // EMAIL VERIFICATION
-          // =================================================
-
-          ScaffoldMessenger.of(context)
-              .showSnackBar(
-            SnackBar(
-              content: Text(
-                data['message']?.toString() ??
-                    'Registration successful',
-              ),
-            ),
-          );
-
-          _firstNameController.clear();
-          _lastNameController.clear();
-          _emailController.clear();
-          _passwordController.clear();
-          _contactController.clear();
-          _addressController.clear();
-          _ageController.clear();
-
-          setState(() {
-            _selectedDateOfBirth = null;
-            _selectedGender = 'Male';
-            _acceptedTerms = false;
-            _isLogin = true;
-          });
-        } else {
-          final msg =
-              (data['message'] ??
-                      data['error'])
-                  ?.toString() ??
-              'Registration failed';
-
-          ScaffoldMessenger.of(context)
-              .showSnackBar(
-            SnackBar(
-              content: Text(msg),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (!mounted) return;
+      final uri = Uri.parse('$apiBaseUrl/api/appointments');
 
       debugPrint(
-        'AUTH ERROR: $e',
-      );
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        SnackBar(
-          content: Text(
-            'Connection error: $e',
-          ),
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(
-          () => _isLoading = false,
-        );
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _firstNameController.dispose();
-    _lastNameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _contactController.dispose();
-    _addressController.dispose();
-    _ageController.dispose();
-
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor:
-          const Color(0xFFF2F6FF),
-      body: Center(
-        child: SingleChildScrollView(
-          padding:
-              const EdgeInsets.symmetric(
-            horizontal: 24,
-            vertical: 30,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(
-                  vertical: 26,
-                  horizontal: 22,
-                ),
-                decoration: BoxDecoration(
-                  gradient:
-                      const LinearGradient(
-                    colors: [
-                      Color(0xFF0F76FF),
-                      Color(0xFF003BB5),
-                    ],
-                    begin:
-                        Alignment.topLeft,
-                    end:
-                        Alignment.bottomRight,
-                  ),
-                  borderRadius:
-                      BorderRadius.circular(28),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black
-                          .withValues(
-                        alpha: 0.18,
-                      ),
-                      blurRadius: 24,
-                      offset:
-                          const Offset(0, 12),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: const [
-                    CircleAvatar(
-                      radius: 36,
-                      backgroundColor:
-                          Colors.white,
-                      child: Icon(
-                        Icons.visibility,
-                        size: 36,
-                        color:
-                            Color(0xFF0F76FF),
-                      ),
-                    ),
-                    SizedBox(height: 18),
-                    Text(
-                      'Gonzales Vision Clinic',
-                      textAlign:
-                          TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight:
-                            FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'Eye Care and Patient Access',
-                      textAlign:
-                          TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-              Container(
-                width: double.infinity,
-                decoration:
-                    BoxDecoration(
-                  color: Colors.white,
-                  borderRadius:
-                      BorderRadius.circular(26),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black
-                          .withValues(
-                        alpha: 0.08,
-                      ),
-                      blurRadius: 20,
-                      offset:
-                          const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                padding:
-                    const EdgeInsets.all(24),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .stretch,
-                    children: [
-                      Container(
-                        decoration:
-                            BoxDecoration(
-                          color:
-                              const Color(
-                                  0xFF0F76FF),
-                          borderRadius:
-                              BorderRadius
-                                  .circular(14),
-                        ),
-                        padding:
-                            const EdgeInsets
-                                .symmetric(
-                          vertical: 12,
-                          horizontal: 16,
-                        ),
-                        child: Text(
-                          _isLogin
-                              ? 'Login'
-                              : 'Register',
-                          style:
-                              const TextStyle(
-                            fontSize: 20,
-                            fontWeight:
-                                FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      if (!_isLogin) ...[
-                        TextFormField(
-                          controller:
-                              _firstNameController,
-                          decoration:
-                              const InputDecoration(
-                            labelText:
-                                'First name',
-                          ),
-                          validator:
-                              (value) =>
-                                  value == null ||
-                                          value
-                                              .trim()
-                                              .isEmpty
-                                      ? 'Enter first name'
-                                      : null,
-                        ),
-                        const SizedBox(
-                            height: 12),
-                        TextFormField(
-                          controller:
-                              _lastNameController,
-                          decoration:
-                              const InputDecoration(
-                            labelText:
-                                'Last name',
-                          ),
-                          validator:
-                              (value) =>
-                                  value == null ||
-                                          value
-                                              .trim()
-                                              .isEmpty
-                                      ? 'Enter last name'
-                                      : null,
-                        ),
-                        const SizedBox(
-                            height: 12),
-                      ],
-                      TextFormField(
-                        controller:
-                            _emailController,
-                        decoration:
-                            const InputDecoration(
-                          labelText:
-                              'Email address',
-                        ),
-                        keyboardType:
-                            TextInputType
-                                .emailAddress,
-                        validator: (value) {
-                          if (value == null ||
-                              value
-                                  .trim()
-                                  .isEmpty) {
-                            return 'Enter email';
-                          }
-
-                          if (!value.contains(
-                              '@')) {
-                            return 'Enter a valid email';
-                          }
-
-                          return null;
-                        },
-                      ),
-                      const SizedBox(
-                          height: 12),
-                      TextFormField(
-                        controller:
-                            _passwordController,
-                        obscureText: true,
-                        decoration:
-                            const InputDecoration(
-                          labelText:
-                              'Password',
-                        ),
-                        validator: (value) =>
-                            value == null ||
-                                    value.isEmpty
-                                ? 'Enter password'
-                                : null,
-                      ),
-                      if (!_isLogin) ...[
-                        const SizedBox(
-                            height: 12),
-                        InkWell(
-                          onTap:
-                              _pickDateOfBirth,
-                          child:
-                              IgnorePointer(
-                            child:
-                                TextFormField(
-                              controller:
-                                  _ageController,
-                              decoration:
-                                  const InputDecoration(
-                                labelText:
-                                    'Date of birth',
-                                suffixIcon:
-                                    Icon(
-                                  Icons
-                                      .calendar_today,
-                                ),
-                              ),
-                              validator:
-                                  (value) =>
-                                      _selectedDateOfBirth ==
-                                              null
-                                          ? 'Select date of birth'
-                                          : null,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(
-                            height: 12),
-                        DropdownButtonFormField<
-                            String>(
-                          initialValue:
-                              _selectedGender,
-                          decoration:
-                              const InputDecoration(
-                            labelText:
-                                'Gender',
-                          ),
-                          items: const [
-                            DropdownMenuItem(
-                              value: 'Male',
-                              child:
-                                  Text('Male'),
-                            ),
-                            DropdownMenuItem(
-                              value: 'Female',
-                              child:
-                                  Text('Female'),
-                            ),
-                          ],
-                          onChanged: (value) {
-                            if (value !=
-                                null) {
-                              setState(() =>
-                                  _selectedGender =
-                                      value);
-                            }
-                          },
-                        ),
-                        const SizedBox(
-                            height: 12),
-                        TextFormField(
-                          controller:
-                              _contactController,
-                          decoration:
-                              const InputDecoration(
-                            labelText:
-                                'Contact number',
-                          ),
-                          keyboardType:
-                              TextInputType.phone,
-                          validator:
-                              (value) =>
-                                  value == null ||
-                                          value
-                                              .trim()
-                                              .isEmpty
-                                      ? 'Enter contact number'
-                                      : null,
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _addressController,
-                          decoration: const InputDecoration(
-                            labelText: 'Address',
-                            hintText: 'Enter your complete address',
-                            alignLabelWithHint: true,
-                          ),
-                          keyboardType: TextInputType.streetAddress,
-                          textInputAction: TextInputAction.newline,
-                          maxLines: 2,
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'Enter address';
-                            }
-                            return null;
-                          },
-                        ),
-                      ],
-                      if (!_isLogin) ...[
-                        const SizedBox(height: 16),
-                        InkWell(
-                          borderRadius: BorderRadius.circular(10),
-                          onTap: _openTermsAndConditions,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Checkbox(
-                                value: _acceptedTerms,
-                                activeColor: const Color(0xFF0F76FF),
-                                onChanged: (value) {
-                                  if (value == true) {
-                                    _openTermsAndConditions();
-                                  } else {
-                                    setState(() {
-                                      _acceptedTerms = false;
-                                    });
-                                  }
-                                },
-                              ),
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.only(top: 12),
-                                  child: Wrap(
-                                    children: [
-                                      const Text(
-                                        'I agree to the ',
-                                        style: TextStyle(fontSize: 14),
-                                      ),
-                                      GestureDetector(
-                                        onTap: _openTermsAndConditions,
-                                        child: const Text(
-                                          'Terms and Conditions',
-                                          style: TextStyle(
-                                            color: Color(0xFF0F76FF),
-                                            fontWeight: FontWeight.w600,
-                                            decoration: TextDecoration.underline,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                      const SizedBox(
-                          height: 24),
-                      ElevatedButton(
-                        style:
-                            ElevatedButton.styleFrom(
-                          backgroundColor:
-                              const Color(
-                                  0xFF0F76FF),
-                          padding:
-                              const EdgeInsets
-                                  .symmetric(
-                            vertical: 16,
-                          ),
-                          shape:
-                              RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius
-                                    .circular(18),
-                          ),
-                        ),
-                        onPressed:
-                            _isLoading
-                                ? null
-                                : _submit,
-                        child: _isLoading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child:
-                                    CircularProgressIndicator(
-                                  strokeWidth:
-                                      2,
-                                  color:
-                                      Colors.white,
-                                ),
-                              )
-                            : Text(
-                                _isLogin
-                                    ? 'Sign In'
-                                    : 'Register',
-                                style:
-                                    const TextStyle(
-                                  fontSize: 16,
-                                ),
-                              ),
-                      ),
-                      const SizedBox(
-                          height: 16),
-                      TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _isLogin = !_isLogin;
-                            if (_isLogin) {
-                              _acceptedTerms = false;
-                            }
-                          });
-                        },
-                        child: Text(
-                          _isLogin
-                              ? 'Create an account? Register'
-                              : 'Already have an account? Login',
-                          style:
-                              const TextStyle(
-                            color:
-                                Color(0xFF0F76FF),
-                            fontWeight:
-                                FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 18),
-              TextButton(
-                onPressed: () {},
-                child: const Text(
-                  'Recover Password or contact support',
-                  style: TextStyle(
-                    color:
-                        Color(0xFF0F76FF),
-                    fontWeight:
-                        FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class FrameModel {
-  final int frameId;
-  final String name;
-  final String? brand;
-  final String? material;
-  final String? category;
-  final String? description;
-  final double price;
-  final int stockQuantity;
-  final String? imageUrl;
-
-  const FrameModel({
-    required this.frameId,
-    required this.name,
-    this.brand,
-    this.material,
-    this.category,
-    this.description,
-    required this.price,
-    required this.stockQuantity,
-    this.imageUrl,
-  });
-
-  factory FrameModel.fromJson(
-      Map<String, dynamic> json) {
-    final rawPrice = json['price'];
-    final rawStock =
-        json['stock_quantity'] ??
-            json['stock'];
-
-    final rawName =
-        json['name'] ??
-            json['frame_name'] ??
-            '';
-
-    final rawImage =
-        json['image_2d_url'] ??
-            json['image_url'] ??
-            json['image'];
-
-    return FrameModel(
-      frameId: json['frame_id'] is num
-          ? (json['frame_id'] as num)
-              .toInt()
-          : int.tryParse(
-                  json['frame_id']
-                          ?.toString() ??
-                      '') ??
-              0,
-      name: rawName.toString(),
-      brand: json['brand'] == null
-          ? null
-          : json['brand'].toString(),
-      material:
-          json['material'] == null
-              ? null
-              : json['material'].toString(),
-      category:
-          json['category'] == null
-              ? null
-              : json['category'].toString(),
-      description:
-          json['description'] == null
-              ? null
-              : json['description'].toString(),
-      price: rawPrice is num
-          ? rawPrice.toDouble()
-          : (rawPrice is String
-              ? double.tryParse(
-                      rawPrice) ??
-                  0.0
-              : 0.0),
-      stockQuantity: rawStock is num
-          ? rawStock.toInt()
-          : (rawStock is String
-              ? int.tryParse(
-                      rawStock) ??
-                  0
-              : 0),
-      imageUrl:
-          rawImage == null
-              ? null
-              : rawImage.toString(),
-    );
-  }
-}
-
-class DashboardScreen
-    extends StatefulWidget {
-  final Map<String, dynamic> profileData;
-
-  const DashboardScreen({
-    super.key,
-    required this.profileData,
-  });
-
-  @override
-  State<DashboardScreen> createState() =>
-      _DashboardScreenState();
-}
-
-class _DashboardScreenState
-    extends State<DashboardScreen> {
-  int _selectedIndex = 0;
-
-  late Map<String, dynamic> _profile;
-
-  bool _loadingAppointments = false;
-  bool _loadingFrames = false;
-  bool _framesError = false;
-
-  String? _framesErrorMessage;
-
-  List<dynamic> _appointments = [];
-
-  List<FrameModel> _frames = [];
-
-  final TextEditingController
-      _frameSearchController =
-      TextEditingController();
-
-  String _frameSearchQuery = '';
-
-  String _selectedFrameCategory =
-      'All';
-
-  List<FrameModel>
-      get _filteredFrames {
-    final query =
-        _frameSearchQuery
-            .trim()
-            .toLowerCase();
-
-    return _frames.where((frame) {
-      final name =
-          frame.name.toLowerCase();
-
-      final brand =
-          (frame.brand ?? '')
-              .toLowerCase();
-
-      final material =
-          (frame.material ?? '')
-              .toLowerCase();
-
-      final category =
-          (frame.category ?? '')
-              .toLowerCase();
-
-      final matchesSearch =
-          query.isEmpty ||
-          name.contains(query) ||
-          brand.contains(query) ||
-          material.contains(query) ||
-          category.contains(query);
-
-      final matchesCategory =
-          _selectedFrameCategory ==
-                  'All' ||
-              category ==
-                  _selectedFrameCategory
-                      .toLowerCase();
-
-      return matchesSearch &&
-          matchesCategory;
-    }).toList();
-  }
-
-  List<String> get _frameCategories {
-    final categories =
-        <String>{};
-
-    for (final frame in _frames) {
-      final category =
-          frame.category?.trim();
-
-      if (category != null &&
-          category.isNotEmpty) {
-        categories.add(category);
-      }
-    }
-
-    final sortedCategories =
-        categories.toList()
-          ..sort(
-            (a, b) => a
-                .toLowerCase()
-                .compareTo(
-                  b.toLowerCase(),
-                ),
-          );
-
-    return [
-      'All',
-      ...sortedCategories,
-    ];
-  }
-
-  @override
-  void initState() {
-    super.initState();
-
-    _profile =
-        widget.profileData;
-
-    // Refresh profile from server
-    // to pick up recent changes.
-    _refreshProfile();
-
-    _loadAppointments();
-    _loadFrames();
-
-    final patientId =
-        _profile['patient_id']
-                ?.toString()
-                .trim() ??
-            '';
-
-    if (patientId.isNotEmpty) {
-      notificationsController
-          .load(patientId);
-    }
-  }
-
-  // =====================================================
-  // TRY ON
-  // =====================================================
-
-  void _openTryOn(FrameModel frame) {
-    debugPrint(
-      'OPENING TRY-ON FOR FRAME: ${frame.frameId}',
-    );
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) =>
-            TryOnWebViewScreen(
-          frameId: frame.frameId,
-        ),
-      ),
-    );
-  }
-
-  // =====================================================
-  // PROFILE
-  // =====================================================
-
-  Future<void> _refreshProfile() async {
-    try {
-      final pid =
-          _profile['patient_id'];
-
-      if (pid == null ||
-          pid.toString().trim().isEmpty) {
-        debugPrint(
-          'PROFILE REFRESH: No patient ID available.',
-        );
-        return;
-      }
-
-      // =====================================================
-      // EXPRESS PROFILE ENDPOINT
-      // GET /api/patients/:id
-      // =====================================================
-
-      final uri = Uri.parse(
-        '$apiBaseUrl/api/patients/'
-        '${Uri.encodeComponent(pid.toString())}',
-      );
-
-      debugPrint(
-        'PROFILE API REQUEST: $uri',
+        'APPOINTMENT AVAILABILITY REQUEST: $uri',
       );
 
       final response = await http
           .get(
             uri,
-            headers: jsonHeaders,
+            headers: {
+              'Accept': 'application/json',
+            },
           )
           .timeout(
             const Duration(seconds: 15),
           );
 
       debugPrint(
-        'PROFILE API STATUS: '
+        'APPOINTMENT AVAILABILITY STATUS: '
         '${response.statusCode}',
       );
 
-      debugPrint(
-        'PROFILE API RESPONSE: '
-        '${response.body}',
-      );
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300) {
+        throw Exception(
+          'Failed to load appointment availability.',
+        );
+      }
 
-      Map<String, dynamic> data =
-          {};
+      final decoded = jsonDecode(response.body);
 
-      try {
-        final decoded =
-            jsonDecode(response.body);
+      if (decoded is! List) {
+        throw Exception(
+          'Invalid appointment data received from server.',
+        );
+      }
 
-        if (decoded
-            is Map<String, dynamic>) {
-          data = decoded;
+      final selectedDateString =
+          _formatDate(_selectedDate);
+
+      final booked = <String>{};
+
+      for (final item in decoded) {
+        if (item is! Map) continue;
+
+        final status =
+            item['appointment_status']
+                    ?.toString()
+                    .trim()
+                    .toLowerCase() ??
+                '';
+
+        /*
+        Cancelled appointments DO NOT block the slot.
+
+        Requested, Pending, Confirmed, Completed, etc.
+        DO block the slot.
+        */
+
+        if (status == 'cancelled' ||
+            status == 'canceled') {
+          continue;
         }
-      } catch (_) {
-        data = {};
+
+        final rawDate =
+            item['appointment_date']?.toString() ?? '';
+
+        final rawTime =
+            item['appointment_time']?.toString() ?? '';
+
+        final appointmentDate =
+            rawDate.split('T').first;
+
+        final appointmentTime =
+            rawTime.length >= 5
+                ? rawTime.substring(0, 5)
+                : rawTime;
+
+        if (appointmentDate ==
+                selectedDateString &&
+            appointmentTime.isNotEmpty) {
+          booked.add(
+            '$appointmentDate $appointmentTime',
+          );
+        }
       }
 
       if (!mounted) return;
 
-      if (response.statusCode >= 200 &&
-          response.statusCode < 300) {
-        // =================================================
-        // EXPRESS ENDPOINT RETURNS
-        // THE PATIENT DIRECTLY
-        // =================================================
+      setState(() {
+        _bookedSlots
+          ..clear()
+          ..addAll(booked);
 
-        setState(() {
-          _profile = {
-            ..._profile,
-            ...data,
+        /*
+        Keep the currently selected time if it is
+        still available.
 
-            // Map backend field names
-            // to the names already used
-            // by the Flutter UI.
+        Remove it only if:
+        - another booking took the slot, or
+        - the 20-minute cutoff has been reached.
+        */
 
-            'patient_id':
-                data['patient_id'] ??
-                    _profile[
-                        'patient_id'],
+        if (currentSelectedTime != null) {
+          final selectedSlotBooked =
+              _isSlotBooked(currentSelectedTime);
 
-            'email':
-                data['email'] ??
-                    _profile['email'],
+          final selectedSlotClosed =
+              _isPastTime(currentSelectedTime);
 
-            'contact_number':
-                data['contact'] ??
-                    data[
-                        'contact_number'] ??
-                    _profile[
-                        'contact_number'],
-
-            'gender':
-                data['gender'] ??
-                    _profile['gender'],
-
-            'age':
-                data['age'] ??
-                    _profile['age'],
-
-            'date_of_birth':
-                data['date_of_birth'] ??
-                    data['dob'] ??
-                    data['birth_date'] ??
-                    _profile[
-                        'date_of_birth'],
-
-            'created_at':
-                data['created_at'] ??
-                    _profile[
-                        'created_at'],
-
-            'last_visit':
-                data['last_visit'] ??
-                    _profile['last_visit'],
-          };
-
-          // =================================================
-          // SPLIT "name" INTO FIRST/LAST NAME
-          // =================================================
-
-          if (data['name'] != null) {
-            final fullName =
-                data['name']
-                    .toString()
-                    .trim();
-
-            if (fullName.isNotEmpty) {
-              final parts =
-                  fullName.split(' ');
-
-              _profile['first_name'] =
-                  parts.first;
-
-              _profile['last_name'] =
-                  parts.length > 1
-                      ? parts
-                          .sublist(1)
-                          .join(' ')
-                      : '';
-            }
+          if (selectedSlotBooked ||
+              selectedSlotClosed) {
+            _selectedTime = null;
+          } else {
+            _selectedTime =
+                currentSelectedTime;
           }
-        });
-
-        debugPrint(
-          'PROFILE REFRESH SUCCESS: $_profile',
-        );
-      } else {
-        debugPrint(
-          'PROFILE REFRESH FAILED: '
-          '${data['message'] ?? data['error']}',
-        );
-      }
-    } catch (e) {
-      debugPrint(
-        'Unable to refresh profile: $e',
-      );
-    }
-  }
-
-  // =====================================================
-  // LOAD APPOINTMENTS
-  // =====================================================
-
-  Future<void> _loadAppointments() async {
-    if (!mounted) return;
-
-    setState(
-      () => _loadingAppointments = true,
-    );
-
-    try {
-      final patientId =
-          _profile['patient_id']
-              ?.toString()
-              .trim();
-
-      if (patientId == null ||
-          patientId.isEmpty) {
-        debugPrint(
-          'APPOINTMENTS: No patient ID available.',
-        );
-
-        setState(
-          () => _appointments = [],
-        );
-
-        return;
-      }
-
-      // =====================================================
-      // EXPRESS APPOINTMENT ENDPOINT
-      // GET /api/appointments/patient/:patient_id
-      // =====================================================
-
-      final uri = Uri.parse(
-        '$apiBaseUrl/api/appointments/patient/'
-        '${Uri.encodeComponent(patientId)}',
-      );
-
-      debugPrint(
-        'APPOINTMENTS API REQUEST: $uri',
-      );
-
-      final response = await http
-          .get(
-            uri,
-            headers: jsonHeaders,
-          )
-          .timeout(
-            const Duration(seconds: 15),
-          );
-
-      debugPrint(
-        'APPOINTMENTS API STATUS: '
-        '${response.statusCode}',
-      );
-
-      debugPrint(
-        'APPOINTMENTS API RESPONSE: '
-        '${response.body}',
-      );
-
-      if (!mounted) return;
-
-      if (response.statusCode >= 200 &&
-          response.statusCode < 300) {
-        final decoded =
-            jsonDecode(response.body);
-
-        if (decoded is List) {
-          setState(() {
-            _appointments = decoded;
-          });
-
-          debugPrint(
-            'APPOINTMENTS LOAD SUCCESS: '
-            '${_appointments.length} appointment(s)',
-          );
-        } else {
-          debugPrint(
-            'APPOINTMENTS ERROR: '
-            'Expected List but received '
-            '${decoded.runtimeType}',
-          );
-
-          setState(() {
-            _appointments = [];
-          });
         }
-
-        return;
-      }
-
-      // =====================================================
-      // SERVER ERROR
-      // =====================================================
-
-      Map<String, dynamic> data =
-          {};
-
-      try {
-        final decoded =
-            jsonDecode(response.body);
-
-        if (decoded
-            is Map<String, dynamic>) {
-          data = decoded;
-        }
-      } catch (_) {}
-
-      final message =
-          (data['message'] ??
-                  data['error'])
-              ?.toString() ??
-          'Failed to load appointments.';
+      });
 
       debugPrint(
-        'APPOINTMENTS API ERROR: $message',
-      );
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        SnackBar(
-          content: Text(message),
-        ),
+        'BOOKED SLOTS FOR $selectedDateString: '
+        '$_bookedSlots',
       );
     } catch (e, st) {
       debugPrint(
-        'APPOINTMENTS API EXCEPTION: $e',
+        'APPOINTMENT AVAILABILITY ERROR: $e',
       );
 
       debugPrint(
-        'APPOINTMENTS API STACK: $st',
+        'APPOINTMENT AVAILABILITY STACK: $st',
       );
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        SnackBar(
-          content: Text(
-            'Unable to load appointments: $e',
-          ),
-        ),
-      );
+      setState(() {
+        _availabilityError =
+            'Unable to load available appointment times.';
+      });
     } finally {
+      _refreshingAvailability = false;
+
       if (mounted) {
-        setState(
-          () => _loadingAppointments = false,
-        );
+        setState(() {
+          _loadingAvailability = false;
+        });
       }
     }
   }
 
-  // =====================================================
-  // LOAD FRAME MODELS
-  // GET /api/frames
-  // =====================================================
+  /*
+  ============================================================
+  BACKGROUND AVAILABILITY REFRESH
 
-  Future<void> _loadFrames() async {
+  Refreshes every 10 seconds without clearing the
+  selected appointment time.
+  ============================================================
+  */
+
+  Future<void> _refreshAvailability() async {
     if (!mounted) return;
 
+    if (_loadingAvailability ||
+        _refreshingAvailability ||
+        _creatingAppointment) {
+      return;
+    }
+
+    await _loadBookedSlots(
+      showLoading: false,
+    );
+  }
+
+  /*
+  ============================================================
+  INITIAL LOAD
+  ============================================================
+  */
+
+  @override
+  void initState() {
+    super.initState();
+
+    _loadBookedSlots();
+
+    /*
+    Refresh appointment availability every 10 seconds.
+    */
+
+    _availabilityRefreshTimer =
+        Timer.periodic(
+      const Duration(seconds: 10),
+      (_) {
+        _refreshAvailability();
+      },
+    );
+  }
+
+  /*
+  ============================================================
+  CREATE APPOINTMENT
+  ============================================================
+  */
+
+  Future<void> _createAppointment() async {
+    final appointmentType =
+        _appointmentTypeController.text.trim();
+
+    /*
+    ------------------------------------------------------------
+    MAKE SURE TIME WAS SELECTED
+    ------------------------------------------------------------
+    */
+
+    if (_selectedTime == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please select an available appointment time.',
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    /*
+    ------------------------------------------------------------
+    MAKE SURE TIME HAS NOT PASSED
+    ------------------------------------------------------------
+    */
+
+    if (_isPastTime(_selectedTime!)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'That appointment time is no longer available. '
+            'Please choose another time.',
+          ),
+        ),
+      );
+
+      await _loadBookedSlots();
+
+      return;
+    }
+
+    /*
+    ------------------------------------------------------------
+    MAKE SURE SLOT IS NOT ALREADY BOOKED
+    ------------------------------------------------------------
+    */
+
+    if (_isSlotBooked(_selectedTime!)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'That appointment slot is already reserved. '
+            'Please choose another time.',
+          ),
+        ),
+      );
+
+      await _loadBookedSlots();
+
+      return;
+    }
+
+    /*
+    ------------------------------------------------------------
+    VALIDATE APPOINTMENT TYPE
+    ------------------------------------------------------------
+    */
+
+    if (appointmentType.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please enter the appointment type.',
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    /*
+    ------------------------------------------------------------
+    VALIDATE PATIENT ID
+    ------------------------------------------------------------
+    */
+
+    final patientId =
+        widget.patientId?.toString().trim();
+
+    if (patientId == null ||
+        patientId.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Patient ID is missing. Please log in again.',
+          ),
+        ),
+      );
+
+      return;
+    }
+
     setState(() {
-      _loadingFrames = true;
-      _framesError = false;
-      _framesErrorMessage = null;
+      _creatingAppointment = true;
     });
 
     try {
       final uri =
-          Uri.parse('$apiBaseUrl/api/frames');
+          Uri.parse('$apiBaseUrl/api/appointments');
+
+      final appointmentDate =
+          _formatDate(_selectedDate);
+
+      final appointmentTime =
+          _toMysqlTime(_selectedTime!);
+
+      /*
+      The provider has been removed.
+
+      The appointment type is now sent directly
+      as the purpose of visit.
+      */
+
+      final purposeOfVisit = appointmentType;
 
       debugPrint(
-        'FRAME API REQUEST: $uri',
+        'APPOINTMENT REQUEST URL: $uri',
+      );
+
+      debugPrint(
+        'APPOINTMENT REQUEST DATA: '
+        'patient_id=$patientId, '
+        'date=$appointmentDate, '
+        'time=$appointmentTime, '
+        'purpose=$purposeOfVisit',
       );
 
       final response = await http
-          .get(
+          .post(
             uri,
-            headers: jsonHeaders,
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode({
+              'patient_id': patientId,
+              'appointment_date': appointmentDate,
+              'appointment_time': appointmentTime,
+              'purpose_of_visit': purposeOfVisit,
+
+              /*
+              Appointment requests from the mobile
+              application enter the admin queue
+              as Requested.
+              */
+
+              'appointment_status': 'Requested',
+            }),
           )
           .timeout(
-            const Duration(seconds: 20),
+            const Duration(seconds: 15),
           );
 
       debugPrint(
-        'FRAME API STATUS: '
+        'APPOINTMENT REQUEST STATUS: '
         '${response.statusCode}',
       );
 
       debugPrint(
-        'FRAME API RESPONSE: '
+        'APPOINTMENT REQUEST RESPONSE: '
         '${response.body}',
       );
 
-      if (!mounted) return;
+      final body = response.body.trim();
 
-      if (response.statusCode >= 200 &&
-          response.statusCode < 300) {
-        final decoded =
-            jsonDecode(response.body);
+      Map<String, dynamic> data = {};
 
-        if (decoded is List) {
-          final frames = decoded
-              .whereType<
-                  Map<String, dynamic>>()
-              .map(
-                (item) =>
-                    FrameModel.fromJson(
-                  item,
-                ),
-              )
-              .toList();
+      if (body.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(body);
 
-          setState(() {
-            _frames = frames;
-            _framesError = false;
-            _framesErrorMessage = null;
-          });
-
+          if (decoded
+              is Map<String, dynamic>) {
+            data = decoded;
+          }
+        } catch (_) {
           debugPrint(
-            'FRAME LOAD SUCCESS: '
-            '${_frames.length} frame(s)',
+            'APPOINTMENT REQUEST: '
+            'Invalid JSON response.',
           );
-        } else {
-          debugPrint(
-            'FRAME API ERROR: '
-            'Expected List but received '
-            '${decoded.runtimeType}',
-          );
-
-          setState(() {
-            _frames = [];
-            _framesError = true;
-            _framesErrorMessage =
-                'Unexpected frame data received from the server.';
-          });
         }
-
-        return;
       }
 
-      Map<String, dynamic> data =
-          {};
+      if (!mounted) return;
 
-      try {
-        final decoded =
-            jsonDecode(response.body);
+      /*
+      ----------------------------------------------------------
+      SUCCESS
+      ----------------------------------------------------------
+      */
 
-        if (decoded
-            is Map<String, dynamic>) {
-          data = decoded;
-        }
-      } catch (_) {}
+      if (response.statusCode == 201) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Appointment request sent successfully!',
+            ),
+          ),
+        );
 
-      final message =
-          (data['message'] ??
-                  data['error'])
-              ?.toString() ??
-          'Failed to load frame models.';
+        _appointmentTypeController.clear();
 
-      debugPrint(
-        'FRAME API ERROR: $message',
-      );
+        setState(() {
+          _selectedTime = null;
+        });
 
-      setState(() {
-        _framesError = true;
-        _framesErrorMessage = message;
-      });
+        /*
+        Immediately refresh availability so the
+        newly requested slot becomes unavailable.
+        */
+
+        await _loadBookedSlots();
+
+        await widget.onScheduled();
+      }
+
+      /*
+      ----------------------------------------------------------
+      SLOT ALREADY RESERVED
+      ----------------------------------------------------------
+      */
+
+      else if (response.statusCode == 409) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
+          SnackBar(
+            content: Text(
+              data['error']?.toString() ??
+                  'This time slot is already reserved.',
+            ),
+          ),
+        );
+
+        await _loadBookedSlots();
+      }
+
+      /*
+      ----------------------------------------------------------
+      BAD REQUEST
+      ----------------------------------------------------------
+      */
+
+      else if (response.statusCode == 400) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
+          SnackBar(
+            content: Text(
+              data['error']?.toString() ??
+                  'Please provide all required appointment details.',
+            ),
+          ),
+        );
+      }
+
+      /*
+      ----------------------------------------------------------
+      OTHER SERVER ERROR
+      ----------------------------------------------------------
+      */
+
+      else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
+          SnackBar(
+            content: Text(
+              data['error']?.toString() ??
+                  data['message']?.toString() ??
+                  'Could not send appointment request.',
+            ),
+          ),
+        );
+      }
     } catch (e, st) {
       debugPrint(
-        'FRAME API EXCEPTION: $e',
+        'APPOINTMENT REQUEST EXCEPTION: $e',
       );
 
       debugPrint(
-        'FRAME API STACK: $st',
+        'APPOINTMENT REQUEST STACK: $st',
       );
 
       if (!mounted) return;
 
-      setState(() {
-        _framesError = true;
-        _framesErrorMessage =
-            'Unable to load frame models right now.';
-      });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        SnackBar(
+          content: Text(
+            'Unable to send appointment request: $e',
+          ),
+        ),
+      );
     } finally {
       if (mounted) {
-        setState(
-          () => _loadingFrames = false,
-        );
+        setState(() {
+          _creatingAppointment = false;
+        });
       }
     }
   }
 
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-  }
+  /*
+  ============================================================
+  DISPOSE
+  ============================================================
+  */
 
   @override
   void dispose() {
-    _frameSearchController.dispose();
+    _availabilityRefreshTimer?.cancel();
+
+    _appointmentTypeController.dispose();
+
     super.dispose();
   }
 
-  // =====================================================
-  // HOME TAB
-  // =====================================================
+  /*
+  ============================================================
+  HEADER
+  ============================================================
+  */
 
-  Widget _buildHomeTab() {
-    final firstName =
-        (_profile['first_name'] as String?)?.trim() ?? '';
-    final lastName =
-        (_profile['last_name'] as String?)?.trim() ?? '';
-
-    var userName = '$firstName $lastName'.trim();
-
-    if (userName.isEmpty) {
-      userName = (_profile['email'] as String?)?.trim() ?? 'Patient';
-    }
-
-    final patientId =
-        _profile['patient_id']?.toString().trim() ?? '';
-
-    final emailVerified =
-        _profile['email_verified'] == true ||
-        _profile['email_verified']?.toString() == '1';
-
-    String lastVisitText = 'No visit recorded';
-    final rawLastVisit = _profile['last_visit'];
-
-    if (rawLastVisit != null &&
-        rawLastVisit.toString().trim().isNotEmpty) {
-      final parsed = DateTime.tryParse(rawLastVisit.toString());
-      if (parsed != null) {
-        lastVisitText = _formatProfileDate(parsed.toIso8601String());
-      } else {
-        lastVisitText = rawLastVisit.toString();
-      }
-    }
-
-    String daysSinceVisit = '—';
-    if (rawLastVisit != null &&
-        rawLastVisit.toString().trim().isNotEmpty) {
-      final parsed = DateTime.tryParse(rawLastVisit.toString());
-      if (parsed != null) {
-        final days = DateTime.now().difference(parsed.toLocal()).inDays;
-        daysSinceVisit = days < 0 ? '0' : days.toString();
-      }
-    }
-
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: ListView(
-        children: [
-          // =====================================================
-          // WELCOME HEADER
-          // =====================================================
-          Container(
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [
-                  Color(0xFF0F76FF),
-                  Color(0xFF0757C9),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: const [
-                BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 18,
-                  offset: Offset(0, 8),
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.all(22),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 52,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.18),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.visibility_outlined,
-                        color: Colors.white,
-                        size: 28,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Welcome back,',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            userName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  'Your eye care dashboard',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Manage appointments, explore frames, and keep your clinic information up to date.',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                    height: 1.45,
-                  ),
-                ),
-                if (patientId.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.badge_outlined,
-                          color: Colors.white,
-                          size: 17,
-                        ),
-                        const SizedBox(width: 7),
-                        Text(
-                          'Patient ID: $patientId',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
+  Widget _buildHeader() {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius:
+            BorderRadius.circular(24),
+        gradient:
+            const LinearGradient(
+          colors: [
+            Color(0xFF0F76FF),
+            Color(0xFF409CFF),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 20,
+            offset: Offset(0, 10),
           ),
+        ],
+      ),
+      padding:
+          const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment:
+            CrossAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.calendar_today,
+            color: Colors.white,
+            size: 32,
+          ),
+
           const SizedBox(height: 16),
 
-          // =====================================================
-          // ACCOUNT STATUS
-          // =====================================================
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.grey.shade200),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: emailVerified
-                        ? Colors.green.withValues(alpha: 0.10)
-                        : Colors.orange.withValues(alpha: 0.10),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    emailVerified
-                        ? Icons.verified_outlined
-                        : Icons.info_outline,
-                    color: emailVerified
-                        ? Colors.green
-                        : Colors.orange,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        emailVerified
-                            ? 'Email verified'
-                            : 'Email verification required',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        (_profile['email'] ?? '').toString(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.black54,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (emailVerified)
-                  const Icon(
-                    Icons.check_circle,
-                    color: Colors.green,
-                    size: 22,
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-
           const Text(
-            'Quick actions',
+            'Select Appointment Date',
+            textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 18,
+              color: Colors.white,
+              fontSize: 16,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 12),
 
-          GridView.count(
-            crossAxisCount: 2,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: 1.35,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              _DashboardTile(
-                label: 'Book Appointment',
-                icon: Icons.calendar_month,
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => AppointmentSchedulerScreen(
-                        patientId: _profile['patient_id'],
-                        onScheduled: _loadAppointments,
-                      ),
-                    ),
-                  );
-                },
-              ),
-              _DashboardTile(
-                label: 'Explore Frames',
-                icon: Icons.grid_view_rounded,
-                onTap: () => _onItemTapped(1),
-              ),
-              _DashboardTile(
-                label: 'My Profile',
-                icon: Icons.person_outline,
-                onTap: () => _onItemTapped(3),
-              ),
-              _DashboardTile(
-                label: 'My Appointments',
-                icon: Icons.event_available_outlined,
-                onTap: () => _onItemTapped(2),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 8),
 
-          // =====================================================
-          // APPOINTMENT SUMMARY
-          // =====================================================
-          const Text(
-            'Your clinic activity',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _SummaryTile(
-                  value: _appointments.length.toString(),
-                  label: 'Booked visits',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _SummaryTile(
-                  value: _appointments.where((item) {
-                    final data = item as Map<String, dynamic>;
-                    final status = normalizeAppointmentStatus(
-                      data['appointment_status'] ?? data['status'],
-                    );
-                    return status.toLowerCase() == 'confirmed';
-                  }).length.toString(),
-                  label: 'Confirmed',
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _SummaryTile(
-                  value: daysSinceVisit,
-                  label: 'Days since visit',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-
-          // =====================================================
-          // LAST VISIT
-          // =====================================================
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.grey.shade200),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0F76FF).withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(13),
-                  ),
-                  child: const Icon(
-                    Icons.history_outlined,
-                    color: Color(0xFF0F76FF),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Last clinic visit',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.black54,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        lastVisitText,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+          Text(
+            'Selected: '
+            '${_selectedDate.day}/'
+            '${_selectedDate.month}/'
+            '${_selectedDate.year}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 14,
             ),
           ),
         ],
@@ -2286,2048 +799,429 @@ class _DashboardScreenState
     );
   }
 
-  // =====================================================
-  // FRAME DETAILS
-  // =====================================================
+  /*
+  ============================================================
+  CALENDAR
+  ============================================================
+  */
 
-  void _showFrameDetails(
-      FrameModel frame) {
-    final imageUrl =
-        resolveFrameImageUrl(
-      frame.imageUrl,
+  Widget _buildCalendarCard() {
+    final today = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
     );
 
-    final inStock =
-        frame.stockQuantity > 0;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor:
-          Colors.transparent,
-      builder: (_) {
-        return Container(
-          height:
-              MediaQuery.of(context)
-                      .size
-                      .height *
-                  0.8,
-          decoration:
-              const BoxDecoration(
-            color: Colors.white,
-            borderRadius:
-                BorderRadius.vertical(
-              top: Radius.circular(24),
-            ),
-          ),
-          child: SafeArea(
-            child:
-                SingleChildScrollView(
-              padding:
-                  const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment
-                        .start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration:
-                          BoxDecoration(
-                        color: Colors
-                            .grey.shade300,
-                        borderRadius:
-                            BorderRadius
-                                .circular(4),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(
-                      height: 18),
-                  ClipRRect(
-                    borderRadius:
-                        BorderRadius.circular(
-                      18,
-                    ),
-                    child: imageUrl.isNotEmpty
-                        ? Image.network(
-                            imageUrl,
-                            height: 220,
-                            width:
-                                double.infinity,
-                            fit:
-                                BoxFit.contain,
-                            loadingBuilder:
-                                (
-                              context,
-                              child,
-                              loadingProgress,
-                            ) {
-                              if (loadingProgress ==
-                                  null) {
-                                return child;
-                              }
-
-                              return Container(
-                                height: 220,
-                                color:
-                                    const Color(
-                                  0xFFEAF2FF,
-                                ),
-                                child:
-                                    const Center(
-                                  child:
-                                      CircularProgressIndicator(),
-                                ),
-                              );
-                            },
-                            errorBuilder:
-                                (
-                              _,
-                              __,
-                              ___,
-                            ) =>
-                                    Container(
-                              height: 220,
-                              width:
-                                  double.infinity,
-                              color:
-                                  const Color(
-                                0xFFEAF2FF,
-                              ),
-                              child:
-                                  const Icon(
-                                Icons
-                                    .remove_red_eye,
-                                size: 52,
-                                color:
-                                    Color(
-                                  0xFF0F76FF,
-                                ),
-                              ),
-                            ),
-                          )
-                        : Container(
-                            height: 220,
-                            width:
-                                double.infinity,
-                            color:
-                                const Color(
-                              0xFFEAF2FF,
-                            ),
-                            child:
-                                const Icon(
-                              Icons
-                                  .remove_red_eye,
-                              size: 52,
-                              color:
-                                  Color(
-                                0xFF0F76FF,
-                              ),
-                            ),
-                          ),
-                  ),
-                  const SizedBox(
-                      height: 20),
-                  Text(
-                    frame.name,
-                    style:
-                        const TextStyle(
-                      fontSize: 24,
-                      fontWeight:
-                          FontWeight.bold,
-                      color:
-                          Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(
-                      height: 6),
-                  if (frame.brand !=
-                          null &&
-                      frame.brand!
-                          .trim()
-                          .isNotEmpty)
-                    Text(
-                      frame.brand!,
-                      style:
-                          const TextStyle(
-                        fontSize: 16,
-                        color:
-                            Colors.black54,
-                      ),
-                    ),
-                  const SizedBox(
-                      height: 16),
-                  Row(
-                    mainAxisAlignment:
-                        MainAxisAlignment
-                            .spaceBetween,
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .center,
-                    children: [
-                      Text(
-                        '₱${frame.price.toStringAsFixed(2)}',
-                        style:
-                            const TextStyle(
-                          fontSize: 22,
-                          fontWeight:
-                              FontWeight.bold,
-                          color:
-                              Color(
-                            0xFF0F76FF,
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding:
-                            const EdgeInsets
-                                .symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration:
-                            BoxDecoration(
-                          color: inStock
-                              ? Colors
-                                  .green
-                                  .withValues(
-                                  alpha:
-                                      0.12,
-                                )
-                              : Colors
-                                  .red
-                                  .withValues(
-                                  alpha:
-                                      0.12,
-                                ),
-                          borderRadius:
-                              BorderRadius
-                                  .circular(
-                            999,
-                          ),
-                        ),
-                        child: Text(
-                          inStock
-                              ? 'Available'
-                              : 'Out of stock',
-                          style:
-                              TextStyle(
-                            fontWeight:
-                                FontWeight
-                                    .bold,
-                            fontSize: 12,
-                            color: inStock
-                                ? Colors
-                                    .green
-                                : Colors
-                                    .red,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Divider(
-                      height: 28),
-                  _InfoRow(
-                    label:
-                        'Stock quantity',
-                    value: frame
-                        .stockQuantity
-                        .toString(),
-                  ),
-                  if (frame.material !=
-                          null &&
-                      frame.material!
-                          .trim()
-                          .isNotEmpty)
-                    _InfoRow(
-                      label: 'Material',
-                      value:
-                          frame.material!,
-                    ),
-                  if (frame.category !=
-                          null &&
-                      frame.category!
-                          .trim()
-                          .isNotEmpty)
-                    _InfoRow(
-                      label: 'Category',
-                      value:
-                          frame.category!,
-                    ),
-                  const SizedBox(
-                      height: 12),
-                  const Text(
-                    'Description',
-                    style:
-                        TextStyle(
-                      fontSize: 14,
-                      fontWeight:
-                          FontWeight.bold,
-                      color:
-                          Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(
-                      height: 6),
-                  Text(
-                    (frame.description !=
-                                null &&
-                            frame.description!
-                                .trim()
-                                .isNotEmpty)
-                        ? frame.description!
-                        : 'No description available for this frame.',
-                    style:
-                        const TextStyle(
-                      fontSize: 14,
-                      color:
-                          Colors.black54,
-                      height: 1.5,
-                    ),
-                  ),
-                  const SizedBox(
-                      height: 24),
-                  SizedBox(
-                    width:
-                        double.infinity,
-                    child:
-                        ElevatedButton
-                            .icon(
-                      onPressed: () {
-                        Navigator.of(
-                                context)
-                            .pop();
-
-                        _openTryOn(frame);
-                      },
-                      icon: const Icon(
-                        Icons.view_in_ar,
-                      ),
-                      label:
-                          const Text(
-                        'Try On',
-                      ),
-                      style:
-                          ElevatedButton
-                              .styleFrom(
-                        backgroundColor:
-                            const Color(
-                          0xFF0F76FF,
-                        ),
-                        foregroundColor:
-                            Colors.white,
-                        padding:
-                            const EdgeInsets
-                                .symmetric(
-                          vertical: 15,
-                        ),
-                        shape:
-                            RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius
-                                  .circular(
-                            16,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildFramesTab() {
-  if (_loadingFrames && _frames.isEmpty) {
-    return const Center(
-      child: CircularProgressIndicator(),
-    );
-  }
-
-  if (_framesError && _frames.isEmpty) {
-    return Center(
+    return Card(
+      shape:
+          RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.circular(24),
+      ),
+      elevation: 3,
       child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.error_outline,
-              size: 48,
-              color: Colors.grey,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _framesErrorMessage ??
-                  'Unable to load frame models.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.black54,
-              ),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: _loadFrames,
-              child: const Text('Retry'),
-            ),
-          ],
+        padding:
+            const EdgeInsets.symmetric(
+          vertical: 16,
+          horizontal: 12,
         ),
-      ),
-    );
-  }
-
-  if (_frames.isEmpty) {
-    return RefreshIndicator(
-      onRefresh: _loadFrames,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        children: const [
-          SizedBox(height: 250),
-          Center(
-            child: Text(
-              'No frames available.',
-              style: TextStyle(
-                color: Colors.black54,
-              ),
-            ),
+        child: CalendarDatePicker(
+          initialDate: _selectedDate,
+          firstDate: today,
+          lastDate: today.add(
+            const Duration(days: 365),
           ),
-        ],
-      ),
-    );
-  }
-
-  final filteredFrames = _filteredFrames;
-  final categories = _frameCategories;
-
-  return Column(
-    children: [
-      // =====================================================
-      // SEARCH BAR
-      // =====================================================
-
-      Padding(
-        padding: const EdgeInsets.fromLTRB(
-          16,
-          16,
-          16,
-          8,
-        ),
-        child: TextField(
-          controller: _frameSearchController,
-          onChanged: (value) {
+          currentDate: today,
+          onDateChanged:
+              (date) async {
             setState(() {
-              _frameSearchQuery = value;
+              _selectedDate = date;
+
+              /*
+              Changing the date always clears
+              the previous selected time.
+              */
+
+              _selectedTime = null;
             });
-          },
-          decoration: InputDecoration(
-            hintText: 'Search frames, brands...',
-            prefixIcon: const Icon(
-              Icons.search,
-              color: Color(0xFF0F76FF),
-            ),
-            suffixIcon: _frameSearchQuery.isNotEmpty
-                ? IconButton(
-                    icon: const Icon(Icons.clear),
-                    onPressed: () {
-                      _frameSearchController.clear();
 
-                      setState(() {
-                        _frameSearchQuery = '';
-                      });
-                    },
-                  )
-                : null,
-            filled: true,
-            fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 14,
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(
-                color: Colors.grey.shade200,
-              ),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(
-                color: Colors.grey.shade200,
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: const BorderSide(
-                color: Color(0xFF0F76FF),
-                width: 1.5,
-              ),
-            ),
-          ),
-        ),
-      ),
-
-      // =====================================================
-      // CATEGORY FILTERS
-      // =====================================================
-
-      SizedBox(
-        height: 48,
-        child: ListView.separated(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 16,
-          ),
-          scrollDirection: Axis.horizontal,
-          itemCount: categories.length,
-          separatorBuilder: (_, __) => const SizedBox(
-            width: 8,
-          ),
-          itemBuilder: (context, index) {
-            final category = categories[index];
-
-            final isSelected =
-                _selectedFrameCategory == category;
-
-            return ChoiceChip(
-              label: Text(category),
-              selected: isSelected,
-              onSelected: (_) {
-                setState(() {
-                  _selectedFrameCategory = category;
-                });
-              },
-              selectedColor: const Color(0xFF0F76FF),
-              backgroundColor: Colors.white,
-              labelStyle: TextStyle(
-                color: isSelected
-                    ? Colors.white
-                    : Colors.black87,
-                fontWeight: isSelected
-                    ? FontWeight.bold
-                    : FontWeight.w500,
-              ),
-              side: BorderSide(
-                color: isSelected
-                    ? const Color(0xFF0F76FF)
-                    : Colors.grey.shade300,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            );
+            await _loadBookedSlots();
           },
         ),
       ),
+    );
+  }
 
-      const SizedBox(height: 8),
+  /*
+  ============================================================
+  TIME SLOT CARD
+  ============================================================
+  */
 
-      // =====================================================
-      // RESULT COUNT
-      // =====================================================
-
-      Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 4,
-        ),
-        child: Row(
+  Widget _buildTimeCard() {
+    return Card(
+      shape:
+          RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.circular(24),
+      ),
+      elevation: 3,
+      child: Padding(
+        padding:
+            const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
           children: [
-            Text(
-              '${filteredFrames.length} '
-              '${filteredFrames.length == 1 ? 'frame' : 'frames'}',
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Colors.black54,
+            const Text(
+              'Select appointment time',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight:
+                    FontWeight.bold,
               ),
             ),
-            const Spacer(),
-            if (_frameSearchQuery.isNotEmpty ||
-                _selectedFrameCategory != 'All')
-              TextButton(
-                onPressed: () {
-                  _frameSearchController.clear();
 
-                  setState(() {
-                    _frameSearchQuery = '';
-                    _selectedFrameCategory = 'All';
-                  });
-                },
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                  ),
-                  minimumSize: Size.zero,
-                ),
-                child: const Text(
-                  'Clear filters',
-                  style: TextStyle(
-                    color: Color(0xFF0F76FF),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+            const SizedBox(height: 6),
+
+            const Text(
+              'Available clinic hours: '
+              '8:00 AM - 5:30 PM',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey,
               ),
-          ],
-        ),
-      ),
+            ),
 
-      // =====================================================
-      // FRAME GRID
-      // =====================================================
+            const SizedBox(height: 16),
 
-      Expanded(
-        child: RefreshIndicator(
-          onRefresh: _loadFrames,
-          child: filteredFrames.isEmpty
-              ? ListView(
-                  physics:
-                      const AlwaysScrollableScrollPhysics(),
-                  children: [
-                    const SizedBox(height: 100),
-                    Icon(
-                      Icons.search_off,
-                      size: 52,
-                      color: Colors.grey.shade400,
-                    ),
-                    const SizedBox(height: 12),
-                    const Center(
-                      child: Text(
-                        'No frames found',
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Center(
-                      child: Text(
-                        'Try another search or category.',
-                        style: TextStyle(
-                          color: Colors.black54,
-                        ),
-                      ),
-                    ),
-                  ],
-                )
-              : GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(
-                    16,
-                    8,
-                    16,
-                    16,
+            if (_loadingAvailability)
+              const Center(
+                child: Padding(
+                  padding:
+                      EdgeInsets.all(20),
+                  child:
+                      CircularProgressIndicator(),
+                ),
+              )
+            else if (_availabilityError !=
+                null)
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.all(
+                  12,
+                ),
+                decoration:
+                    BoxDecoration(
+                  color:
+                      Colors.red.shade50,
+                  borderRadius:
+                      BorderRadius.circular(
+                    12,
                   ),
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-
-                    // FIX:
-                    // Give every card enough vertical space
-                    // instead of calculating height from width.
-                    mainAxisExtent: 260,
+                ),
+                child: Text(
+                  _availabilityError!,
+                  style: TextStyle(
+                    color:
+                        Colors.red.shade700,
+                    fontSize: 13,
                   ),
-                  itemCount: filteredFrames.length,
-                  itemBuilder: (context, index) {
-                    final frame = filteredFrames[index];
-
-                    final imageUrl =
-                        resolveFrameImageUrl(
-                      frame.imageUrl,
+                ),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children:
+                    _operatingTimeSlots
+                        .map(
+                  (time) {
+                    final booked =
+                        _isSlotBooked(
+                      time,
                     );
 
-                    final inStock =
-                        frame.stockQuantity > 0;
+                    final past =
+                        _isPastTime(
+                      time,
+                    );
 
-                    return InkWell(
-                      onTap: () => _showFrameDetails(frame),
-                      borderRadius: BorderRadius.circular(20),
-                      child: Card(
-                        margin: EdgeInsets.zero,
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(20),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                          children: [
-                            // =================================================
-                            // IMAGE
-                            // =================================================
+                    final disabled =
+                        booked || past;
 
-                            SizedBox(
-                              height: 120,
-                              width: double.infinity,
-                              child: imageUrl.isNotEmpty
-                                  ? Image.network(
-                                      imageUrl,
-                                      width: double.infinity,
-                                      height: 120,
-                                      fit: BoxFit.contain,
-                                      loadingBuilder: (
-                                        context,
-                                        child,
-                                        loadingProgress,
-                                      ) {
-                                        if (loadingProgress ==
-                                            null) {
-                                          return child;
-                                        }
+                    final selected =
+                        _selectedTime !=
+                                null &&
+                            _selectedTime!
+                                    .hour ==
+                                time.hour &&
+                            _selectedTime!
+                                    .minute ==
+                                time.minute;
 
-                                        return Container(
-                                          width: double.infinity,
-                                          height: 120,
-                                          color: const Color(
-                                            0xFFEAF2FF,
-                                          ),
-                                          child:
-                                              const Center(
-                                            child: SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child:
-                                                  CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                              ),
-                                            ),
-                                          ),
-                                        );
+                    return SizedBox(
+                      width: 105,
+                      child:
+                          OutlinedButton(
+                        onPressed:
+                            disabled
+                                ? null
+                                : () {
+                                    setState(
+                                      () {
+                                        _selectedTime =
+                                            time;
                                       },
-                                      errorBuilder: (
-                                        _,
-                                        __,
-                                        ___,
-                                      ) {
-                                        return Container(
-                                          width: double.infinity,
-                                          height: 120,
-                                          color: const Color(
-                                            0xFFEAF2FF,
-                                          ),
-                                          child: const Icon(
-                                            Icons
-                                                .remove_red_eye,
-                                            size: 34,
-                                            color: Color(
-                                              0xFF0F76FF,
-                                            ),
-                                          ),
-                                        );
-                                      },
+                                    );
+                                  },
+                        style:
+                            OutlinedButton
+                                .styleFrom(
+                          padding:
+                              const EdgeInsets
+                                  .symmetric(
+                            vertical: 12,
+                          ),
+
+                          backgroundColor:
+                              selected
+                                  ? const Color(
+                                      0xFF0F76FF,
                                     )
-                                  : Container(
-                                      width: double.infinity,
-                                      height: 120,
-                                      color: const Color(
-                                        0xFFEAF2FF,
+                                  : disabled
+                                      ? Colors
+                                          .grey
+                                          .shade100
+                                      : Colors
+                                          .white,
+
+                          foregroundColor:
+                              selected
+                                  ? Colors
+                                      .white
+                                  : disabled
+                                      ? Colors
+                                          .grey
+                                      : const Color(
+                                          0xFF0F76FF,
+                                        ),
+
+                          side:
+                              BorderSide(
+                            color: selected
+                                ? const Color(
+                                    0xFF0F76FF,
+                                  )
+                                : disabled
+                                    ? Colors
+                                        .grey
+                                        .shade300
+                                    : const Color(
+                                        0xFF0F76FF,
                                       ),
-                                      child: const Icon(
-                                        Icons.remove_red_eye,
-                                        size: 34,
-                                        color:
-                                            Color(0xFF0F76FF),
-                                      ),
-                                    ),
+                          ),
+
+                          shape:
+                              RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius
+                                    .circular(
+                              12,
                             ),
-
-                            // =================================================
-                            // DETAILS
-                            // =================================================
-
-                            Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(
-                                12,
-                                10,
-                                12,
-                                10,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              time.format(
+                                context,
                               ),
-                              child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                children: [
-                                  // FRAME NAME
-                                  Text(
-                                    frame.name,
-                                    maxLines: 2,
-                                    overflow:
-                                        TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      height: 1.15,
-                                      fontWeight:
-                                          FontWeight.bold,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-
-                                  const SizedBox(height: 4),
-
-                                  // BRAND
-                                  if (frame.brand != null &&
-                                      frame.brand!
-                                          .trim()
-                                          .isNotEmpty)
-                                    Text(
-                                      frame.brand!,
-                                      maxLines: 1,
-                                      overflow:
-                                          TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        height: 1.1,
-                                        color: Colors.black54,
-                                      ),
-                                    ),
-
-                                  const SizedBox(height: 8),
-
-                                  // PRICE + STOCK
-                                  Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          '₱${frame.price.toStringAsFixed(2)}',
-                                          maxLines: 1,
-                                          overflow:
-                                              TextOverflow
-                                                  .ellipsis,
-                                          style:
-                                              const TextStyle(
-                                            fontSize: 15,
-                                            fontWeight:
-                                                FontWeight.bold,
-                                            color: Color(
-                                              0xFF0F76FF,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-
-                                      const SizedBox(width: 6),
-
-                                      Container(
-                                        padding:
-                                            const EdgeInsets
-                                                .symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
-                                        ),
-                                        decoration:
-                                            BoxDecoration(
-                                          color: inStock
-                                              ? Colors.green
-                                                  .withValues(
-                                                  alpha: 0.12,
-                                                )
-                                              : Colors.red
-                                                  .withValues(
-                                                  alpha: 0.12,
-                                                ),
-                                          borderRadius:
-                                              BorderRadius
-                                                  .circular(
-                                            999,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          inStock
-                                              ? 'Available'
-                                              : 'Sold out',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            color: inStock
-                                                ? Colors.green
-                                                : Colors.red,
-                                            fontWeight:
-                                                FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
+                              style:
+                                  const TextStyle(
+                                fontWeight:
+                                    FontWeight
+                                        .w600,
                               ),
                             ),
+
+                            if (booked)
+                              const Text(
+                                'Reserved',
+                                style:
+                                    TextStyle(
+                                  fontSize:
+                                      10,
+                                ),
+                              )
+                            else if (past)
+                              const Text(
+                                'Booking Closed',
+                                style:
+                                    TextStyle(
+                                  fontSize:
+                                      10,
+                                ),
+                              ),
                           ],
                         ),
                       ),
                     );
                   },
-                ),
+                ).toList(),
+              ),
+          ],
         ),
       ),
-    ],
-  );
-}
+    );
+  }
 
-  // =====================================================
-  // APPOINTMENTS TAB
-  // =====================================================
+  /*
+  ============================================================
+  APPOINTMENT INPUT CARD
 
-  Widget _buildAppointmentsTab() {
-    return RefreshIndicator(
-      onRefresh:
-          _loadAppointments,
-      child: ListView(
+  Provider has been completely removed.
+  ============================================================
+  */
+
+  Widget _buildInputCard() {
+    return Card(
+      shape:
+          RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.circular(24),
+      ),
+      elevation: 3,
+      child: Padding(
         padding:
-            const EdgeInsets.all(16),
-        children: [
-          Card(
-            shape:
-                RoundedRectangleBorder(
-              borderRadius:
-                  BorderRadius.circular(
-                24,
+            const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment:
+              CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Appointment Details',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight:
+                    FontWeight.bold,
               ),
             ),
-            elevation: 4,
-            child: Padding(
-              padding:
-                  const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.center,
-                children: [
-                  Container(
-                    decoration:
-                        BoxDecoration(
-                      color:
-                          const Color(
-                        0xFF0F76FF,
-                      ),
-                      borderRadius:
-                          BorderRadius.circular(
-                        16,
-                      ),
-                    ),
-                    padding:
-                        const EdgeInsets.all(
-                      14,
-                    ),
-                    child: const Icon(
-                      Icons.event_available,
-                      color:
-                          Colors.white,
-                      size: 28,
-                    ),
-                  ),
-                  const SizedBox(
-                      height: 16),
-                  const Text(
-                    'My Appointments',
-                    textAlign:
-                        TextAlign.center,
+
+            const SizedBox(height: 14),
+
+            TextField(
+              controller:
+                  _appointmentTypeController,
+              decoration:
+                  const InputDecoration(
+                labelText:
+                    'Purpose of Visit',
+                hintText:
+                    'Enter the reason for your visit',
+                border:
+                    OutlineInputBorder(),
+                prefixIcon:
+                    Icon(
+                  Icons.assignment_outlined,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /*
+  ============================================================
+  CONFIRM BUTTON
+  ============================================================
+  */
+
+  Widget _buildActionButton() {
+    return SizedBox(
+      height: 52,
+      child: ElevatedButton(
+        onPressed:
+            _creatingAppointment
+                ? null
+                : _createAppointment,
+        style:
+            ElevatedButton.styleFrom(
+          backgroundColor:
+              const Color(0xFF0F76FF),
+          shape:
+              RoundedRectangleBorder(
+            borderRadius:
+                BorderRadius.circular(18),
+          ),
+        ),
+        child:
+            _creatingAppointment
+                ? const CircularProgressIndicator(
+                    color: Colors.white,
+                  )
+                : const Text(
+                    'Confirm Appointment',
                     style: TextStyle(
-                      fontSize: 20,
+                      fontSize: 14,
                       fontWeight:
                           FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(
-                      height: 6),
-                  const Text(
-                    'Review your upcoming visits and booking details.',
-                    textAlign:
-                        TextAlign.center,
-                    style: TextStyle(
-                      color:
-                          Colors.black54,
-                    ),
-                  ),
-                  const SizedBox(
-                      height: 18),
-                  SizedBox(
-                    width:
-                        double.infinity,
-                    child:
-                        ElevatedButton
-                            .icon(
-                      onPressed: () {
-                        Navigator.of(
-                                context)
-                            .push(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                AppointmentSchedulerScreen(
-                              patientId:
-                                  _profile[
-                                      'patient_id'],
-                              onScheduled:
-                                  _loadAppointments,
-                            ),
-                          ),
-                        );
-                      },
-                      icon:
-                          const Icon(
-                        Icons
-                            .add_circle_outline,
-                      ),
-                      label:
-                          const Text(
-                        'Schedule New Appointment',
-                        style: TextStyle(fontSize: 14),
-                      ),
-                      style:
-                          ElevatedButton
-                              .styleFrom(
-                        backgroundColor:
-                            const Color(
-                          0xFF0F76FF,
-                        ),
-                        shape:
-                            RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius
-                                  .circular(
-                            18,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(
-              height: 20),
-          if (_loadingAppointments)
-            const Center(
-              child:
-                  CircularProgressIndicator(),
-            )
-          else if (_appointments
-              .isEmpty)
-            Center(
-              child: Text(
-                'No appointments found for patient ${_profile['patient_id'] ?? 'unknown'}. Pull down to refresh.',
-                textAlign:
-                    TextAlign.center,
-              ),
-            )
-          else
-            ..._appointments.map(
-              (appointment) {
-                final data =
-                    appointment
-                        as Map<String,
-                            dynamic>;
-
-                final purposeOfVisit =
-                    (data[
-                                'purpose_of_visit'] ??
-                            '')
-                        .toString();
-
-                final status =
-                    normalizeAppointmentStatus(
-                  data[
-                          'appointment_status'] ??
-                      data['status'],
-                );
-
-                final statusKey =
-                    status.toLowerCase();
-
-                final statusColor =
-                    statusKey ==
-                            'confirmed'
-                        ? Colors.green
-                        : statusKey ==
-                                'pending'
-                            ? Colors.orange
-                            : statusKey ==
-                                    'cancelled'
-                                ? Colors.red
-                                : Colors.grey;
-
-                return Card(
-                  margin:
-                      const EdgeInsets.only(
-                    bottom: 14,
-                  ),
-                  shape:
-                      RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(
-                      20,
-                    ),
-                  ),
-                  elevation: 2,
-                  child: Padding(
-                    padding:
-                        const EdgeInsets.all(
-                      16,
-                    ),
-                    child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .stretch,
-                      children: [
-                        Row(
-                          mainAxisAlignment:
-                              MainAxisAlignment
-                                  .spaceBetween,
-                          children: [
-                            Text(
-                              '${data['appointment_date']} · ${data['appointment_time']}',
-                              style:
-                                  const TextStyle(
-                                fontSize:
-                                    16,
-                                fontWeight:
-                                    FontWeight.w600,
-                              ),
-                            ),
-                            Container(
-                              padding:
-                                  const EdgeInsets
-                                      .symmetric(
-                                horizontal:
-                                    12,
-                                vertical:
-                                    6,
-                              ),
-                              decoration:
-                                  BoxDecoration(
-                                color:
-                                    Color.fromRGBO(
-                                  (statusColor.r *
-                                          255.0)
-                                      .round(),
-                                  (statusColor.g *
-                                          255.0)
-                                      .round(),
-                                  (statusColor.b *
-                                          255.0)
-                                      .round(),
-                                  0.12,
-                                ),
-                                borderRadius:
-                                    BorderRadius
-                                        .circular(
-                                  14,
-                                ),
-                              ),
-                              child:
-                                  Text(
-                                status.isEmpty
-                                    ? 'UNKNOWN'
-                                    : status
-                                        .toUpperCase(),
-                                style:
-                                    TextStyle(
-                                  color:
-                                      statusColor,
-                                  fontWeight:
-                                      FontWeight
-                                          .bold,
-                                  fontSize:
-                                      12,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(
-                            height: 10),
-                        Text(
-                          'Purpose of Visit: ${purposeOfVisit.isEmpty ? '-' : purposeOfVisit}',
-                          style:
-                              const TextStyle(
-                            color: Colors.black87,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-        ],
       ),
     );
   }
 
-  String _formatProfileDate(dynamic value) {
-  if (value == null || value.toString().trim().isEmpty) {
-    return '-';
-  }
-
-  final rawValue = value.toString().trim();
-
-  // Try to parse normal database date/datetime values.
-  final parsed = DateTime.tryParse(rawValue);
-
-  if (parsed != null) {
-    return '${parsed.day.toString().padLeft(2, '0')}/'
-        '${parsed.month.toString().padLeft(2, '0')}/'
-        '${parsed.year}';
-  }
-
-  // Fallback for values that may already contain
-  // something like "04/08/2004 at 00:00".
-  final cleaned = rawValue.split(' at ').first.trim();
-
-  if (cleaned.isEmpty) {
-    return '-';
-  }
-
-  return cleaned;
-}
-
-  // =====================================================
-  // PROFILE TAB
-  // =====================================================
-
-  Widget _buildProfileTab() {
-    final firstName =
-        (_profile['first_name'] as String?)?.trim() ?? '';
-    final lastName =
-        (_profile['last_name'] as String?)?.trim() ?? '';
-    final fullName = '$firstName $lastName'.trim().isNotEmpty
-        ? '$firstName $lastName'.trim()
-        : (_profile['name']?.toString().trim().isNotEmpty == true
-            ? _profile['name'].toString().trim()
-            : 'Patient');
-
-    final initials = fullName
-        .split(RegExp(r'\s+'))
-        .where((part) => part.isNotEmpty)
-        .take(2)
-        .map((part) => part[0].toUpperCase())
-        .join();
-
-    final email = _profile['email']?.toString().trim() ?? '';
-    final contact =
-        (_profile['contact_number'] ?? _profile['contact'] ?? '')
-            .toString()
-            .trim();
-    final address =
-        (_profile['address'] ?? '').toString().trim();
-    final patientId =
-        _profile['patient_id']?.toString().trim() ?? '-';
-    final gender = _profile['gender']?.toString().trim() ?? '';
-    final age = _profile['age']?.toString().trim() ?? '';
-    final status =
-        _profile['status']?.toString().trim().isNotEmpty == true
-            ? _profile['status'].toString().trim()
-            : 'Active';
-
-    final emailVerified =
-        _profile['email_verified'] == true ||
-        _profile['email_verified']?.toString() == '1';
-
-    final dateOfBirth = _profile['date_of_birth']?.toString();
-    final lastVisit = _profile['last_visit']?.toString();
-
-    return RefreshIndicator(
-      onRefresh: _refreshProfile,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-        children: [
-          // =====================================================
-          // PROFILE HEADER
-          // =====================================================
-          Container(
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [
-                  Color(0xFF0F76FF),
-                  Color(0xFF0757C9),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: const [
-                BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 18,
-                  offset: Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    CircleAvatar(
-                      radius: 34,
-                      backgroundColor: Colors.white,
-                      child: Text(
-                        initials.isEmpty ? 'P' : initials,
-                        style: const TextStyle(
-                          color: Color(0xFF0F76FF),
-                          fontSize: 23,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            fullName,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            email.isEmpty ? 'No email address' : email,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 9),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 5,
-                            ),
-                            decoration: BoxDecoration(
-                              color: emailVerified
-                                  ? Colors.white.withValues(alpha: 0.16)
-                                  : Colors.orange.withValues(alpha: 0.22),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  emailVerified
-                                      ? Icons.verified_outlined
-                                      : Icons.info_outline,
-                                  size: 15,
-                                  color: Colors.white,
-                                ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  emailVerified
-                                      ? 'Email verified'
-                                      : 'Email not verified',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 11,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.badge_outlined,
-                        color: Colors.white,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Patient ID',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        patientId,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          // =====================================================
-          // EDIT PROFILE
-          // =====================================================
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () async {
-                final result = await Navigator.of(context).push<
-                    Map<String, dynamic>>(
-                  MaterialPageRoute(
-                    builder: (_) => EditProfileScreen(
-                      profile: _profile,
-                    ),
-                  ),
-                );
-
-                if (result != null && mounted) {
-                  setState(() {
-                    _profile = {
-                      ..._profile,
-                      ...result,
-                    };
-                  });
-                  await _refreshProfile();
-                }
-              },
-              icon: const Icon(Icons.edit_outlined),
-              label: const Text('Edit Profile'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF0F76FF),
-                backgroundColor: Colors.white,
-                side: const BorderSide(
-                  color: Color(0xFF0F76FF),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 22),
-
-          const Text(
-            'Personal information',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            margin: EdgeInsets.zero,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-              side: BorderSide(color: Colors.grey.shade200),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(17),
-              child: Column(
-                children: [
-                  _ProfileInfoRow(
-                    icon: Icons.email_outlined,
-                    label: 'Email address',
-                    value: email.isEmpty ? '-' : email,
-                  ),
-                  _ProfileInfoRow(
-                    icon: Icons.phone_outlined,
-                    label: 'Contact number',
-                    value: contact.isEmpty ? '-' : contact,
-                  ),
-                  _ProfileInfoRow(
-                    icon: Icons.home_outlined,
-                    label: 'Address',
-                    value: address.isEmpty ? '-' : address,
-                  ),
-                  _ProfileInfoRow(
-                    icon: Icons.cake_outlined,
-                    label: 'Date of birth',
-                    value: (dateOfBirth == null ||
-                            dateOfBirth.trim().isEmpty)
-                        ? '-'
-                        : _formatProfileDate(dateOfBirth),
-                  ),
-                  _ProfileInfoRow(
-                    icon: Icons.person_outline,
-                    label: 'Gender',
-                    value: gender.isEmpty ? '-' : gender,
-                  ),
-                  _ProfileInfoRow(
-                    icon: Icons.numbers_outlined,
-                    label: 'Age',
-                    value: age.isEmpty ? '-' : age,
-                    showDivider: false,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 22),
-
-          const Text(
-            'Clinic information',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            margin: EdgeInsets.zero,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-              side: BorderSide(color: Colors.grey.shade200),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(17),
-              child: Column(
-                children: [
-                  _ProfileInfoRow(
-                    icon: Icons.badge_outlined,
-                    label: 'Patient ID',
-                    value: patientId,
-                  ),
-                  _ProfileInfoRow(
-                    icon: Icons.verified_user_outlined,
-                    label: 'Account status',
-                    value: status,
-                    valueColor: status.toLowerCase() == 'active'
-                        ? Colors.green
-                        : Colors.orange,
-                  ),
-                  _ProfileInfoRow(
-                    icon: Icons.history_outlined,
-                    label: 'Last visit',
-                    value: (lastVisit == null ||
-                            lastVisit.trim().isEmpty)
-                        ? 'No visit recorded'
-                        : _formatProfileDate(lastVisit),
-                  ),
-                  _ProfileInfoRow(
-                    icon: Icons.calendar_today_outlined,
-                    label: 'Registered',
-                    value: _formatProfileDate(_profile['created_at']),
-                    showDivider: false,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Center(
-            child: Text(
-              'Pull down to refresh your profile information.',
-              style: TextStyle(
-                color: Colors.black45,
-                fontSize: 12,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(
-      BuildContext context) {
-    final tabs = [
-      _buildHomeTab(),
-      _buildFramesTab(),
-      _buildAppointmentsTab(),
-      _buildProfileTab(),
-    ];
-
-    return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 72,
-        centerTitle: true,
-        title: const Text(
-          'Gonzales Vision Clinic',
-          textAlign:
-              TextAlign.center,
-          maxLines: 2,
-          overflow:
-              TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight:
-                FontWeight.bold,
-          ),
-        ),
-        backgroundColor:
-            const Color(0xFF0F76FF),
-        actions: [
-          // =====================================================
-          // NOTIFICATIONS
-          // =====================================================
-
-          IconButton(
-            icon: Stack(
-              alignment:
-                  Alignment.topRight,
-              children: [
-                const Icon(
-                  Icons.notifications,
-                ),
-                if (notificationsController
-                        .unreadCount >
-                    0)
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    child:
-                        Container(
-                      width: 10,
-                      height: 10,
-                      decoration:
-                          const BoxDecoration(
-                        color:
-                            Colors.red,
-                        shape:
-                            BoxShape
-                                .circle,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            tooltip:
-                'Notifications',
-            onPressed: () {
-              Navigator.of(context)
-                  .push(
-                MaterialPageRoute(
-                  builder: (_) =>
-                      NotificationScreen(
-                    patientId:
-                        _profile[
-                                    'patient_id']
-                                ?.toString() ??
-                            '',
-                  ),
-                ),
-              );
-            },
-          ),
-
-          // =====================================================
-          // SETTINGS
-          // =====================================================
-
-          IconButton(
-            icon: const Icon(
-              Icons.settings,
-            ),
-            tooltip: 'Settings',
-            onPressed: () {
-              Navigator.of(context)
-                  .push(
-                MaterialPageRoute(
-                  builder: (_) =>
-                      SettingsScreen(
-                    patientId:
-                        _profile[
-                            'patient_id'],
-                  ),
-                ),
-              );
-            },
-          ),
-
-          // =====================================================
-          // LOGOUT
-          // =====================================================
-
-          IconButton(
-            icon: const Icon(
-              Icons.logout,
-            ),
-            tooltip: 'Logout',
-            onPressed: () {
-              Navigator.of(context)
-                  .pushAndRemoveUntil(
-                MaterialPageRoute(
-                  builder: (_) =>
-                      const AuthScreen(),
-                ),
-                (route) => false,
-              );
-            },
-          ),
-        ],
-      ),
-      body: tabs[_selectedIndex],
-      bottomNavigationBar:
-          BottomNavigationBar(
-        currentIndex:
-            _selectedIndex,
-        onTap: _onItemTapped,
-        selectedItemColor:
-            const Color(0xFF0F76FF),
-        unselectedItemColor:
-            Colors.grey,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon:
-                Icon(Icons.grid_view),
-            label: 'Frames',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(
-                Icons.calendar_today),
-            label:
-                'Appointments',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Profile',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DashboardTile
-    extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback? onTap;
-
-  const _DashboardTile({
-    required this.label,
-    required this.icon,
-    this.onTap,
-  });
-
-  @override
-  Widget build(
-      BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration:
-            BoxDecoration(
-          color: Colors.white,
-          borderRadius:
-              BorderRadius.circular(18),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black12,
-              blurRadius: 12,
-              offset:
-                  Offset(0, 6),
-            ),
-          ],
-        ),
-        padding:
-            const EdgeInsets.all(16),
-        child: Column(
-          mainAxisAlignment:
-              MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              color:
-                  const Color(
-                0xFF0F76FF,
-              ),
-              size: 28,
-            ),
-            const SizedBox(
-                height: 12),
-            Text(
-              label,
-              textAlign:
-                  TextAlign.center,
-              style:
-                  const TextStyle(
-                fontWeight:
-                    FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SummaryTile
-    extends StatelessWidget {
-  final String value;
-  final String label;
-
-  const _SummaryTile({
-    required this.value,
-    required this.label,
-  });
-
-  @override
-  Widget build(
-      BuildContext context) {
-    return Expanded(
-      child: Container(
-        margin:
-            const EdgeInsets.symmetric(
-          horizontal: 4,
-        ),
-        decoration:
-            BoxDecoration(
-          color: Colors.white,
-          borderRadius:
-              BorderRadius.circular(18),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black12,
-              blurRadius: 12,
-              offset:
-                  Offset(0, 6),
-            ),
-          ],
-        ),
-        padding:
-            const EdgeInsets.symmetric(
-          vertical: 18,
-        ),
-        child: Column(
-          mainAxisSize:
-              MainAxisSize.min,
-          children: [
-            Text(
-              value,
-              textAlign:
-                  TextAlign.center,
-              style:
-                  const TextStyle(
-                fontSize: 20,
-                fontWeight:
-                    FontWeight.bold,
-                color:
-                    Color(0xFF0F76FF),
-              ),
-            ),
-            const SizedBox(
-                height: 6),
-            Text(
-              label,
-              textAlign:
-                  TextAlign.center,
-              style:
-                  const TextStyle(
-                color: Colors.grey,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _InfoRow
-    extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _InfoRow({
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(
-      BuildContext context) {
-    return Padding(
-      padding:
-          const EdgeInsets.only(
-        bottom: 10,
-      ),
-      child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 110,
-            child: Text(
-              label,
-              style:
-                  const TextStyle(
-                fontSize: 13,
-                fontWeight:
-                    FontWeight.w600,
-                color:
-                    Colors.black87,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style:
-                  const TextStyle(
-                fontSize: 13,
-                color:
-                    Colors.black54,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProfileInfoRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color? valueColor;
-  final bool showDivider;
-
-  const _ProfileInfoRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.valueColor,
-    this.showDivider = true,
-  });
+  /*
+  ============================================================
+  BUILD
+  ============================================================
+  */
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 9),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Appointment Scheduler',
+        ),
+        backgroundColor:
+            const Color(0xFF0F76FF),
+        elevation: 0,
+      ),
+
+      body: SafeArea(
+        child:
+            SingleChildScrollView(
+          padding:
+              const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment:
+                CrossAxisAlignment.stretch,
             children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0F76FF).withValues(alpha: 0.09),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                child: Icon(
-                  icon,
-                  color: const Color(0xFF0F76FF),
-                  size: 19,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: const TextStyle(
-                        color: Colors.black54,
-                        fontSize: 11,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      value,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: valueColor ?? Colors.black87,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              _buildHeader(),
+
+              const SizedBox(height: 20),
+
+              _buildCalendarCard(),
+
+              const SizedBox(height: 16),
+
+              _buildTimeCard(),
+
+              const SizedBox(height: 16),
+
+              _buildInputCard(),
+
+              const SizedBox(height: 24),
+
+              _buildActionButton(),
             ],
           ),
         ),
-        if (showDivider)
-          Divider(
-            height: 1,
-            color: Colors.grey.shade200,
-          ),
-      ],
-    );
-  }
-}
-
-class _ProfileDetail
-    extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _ProfileDetail({
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(
-      BuildContext context) {
-    return Padding(
-      padding:
-          const EdgeInsets.only(
-        bottom: 12,
-      ),
-      child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              '$label:',
-              style:
-                  const TextStyle(
-                fontWeight:
-                    FontWeight.bold,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(value),
-          ),
-        ],
       ),
     );
   }
