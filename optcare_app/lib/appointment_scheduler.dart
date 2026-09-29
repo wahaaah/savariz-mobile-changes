@@ -772,11 +772,11 @@ class _AppointmentSchedulerScreenState
           const SizedBox(height: 16),
 
           const Text(
-            'Pick a date on the calendar',
+            'Select Appointment Date',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white,
-              fontSize: 22,
+              fontSize: 16,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -791,7 +791,7 @@ class _AppointmentSchedulerScreenState
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.white70,
-              fontSize: 16,
+              fontSize: 14,
             ),
           ),
         ],
@@ -876,7 +876,7 @@ class _AppointmentSchedulerScreenState
             const Text(
               'Select appointment time',
               style: TextStyle(
-                fontSize: 18,
+                fontSize: 16,
                 fontWeight:
                     FontWeight.bold,
               ),
@@ -1101,9 +1101,9 @@ class _AppointmentSchedulerScreenState
               CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'Appointment details',
+              'Appointment Details',
               style: TextStyle(
-                fontSize: 18,
+                fontSize: 16,
                 fontWeight:
                     FontWeight.bold,
               ),
@@ -1117,12 +1117,14 @@ class _AppointmentSchedulerScreenState
               decoration:
                   const InputDecoration(
                 labelText:
-                    'Appointment type',
+                    'Purpose of Visit',
+                hintText:
+                    'Enter the reason for your visit',
                 border:
                     OutlineInputBorder(),
                 prefixIcon:
                     Icon(
-                  Icons.medical_services,
+                  Icons.assignment_outlined,
                 ),
               ),
             ),
@@ -1164,7 +1166,7 @@ class _AppointmentSchedulerScreenState
                 : const Text(
                     'Confirm Appointment',
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 14,
                       fontWeight:
                           FontWeight.bold,
                     ),
